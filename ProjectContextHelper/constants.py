@@ -1,7 +1,8 @@
 from models import ScanSettings
 
+
 APP_NAME = "Project Context Helper"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"
 AUTHOR = "Jason Brisart"
 
 REPOSITORY_NAME = "BrisartDevTools"
@@ -16,6 +17,7 @@ MANIFEST_FILENAME = "PROJECT_MANIFEST.json"
 SUMMARY_FILENAME = "PROJECT_SUMMARY.txt"
 SNAPSHOT_FILENAME = "PROJECT_SNAPSHOT.zip"
 SETTINGS_FILENAME = "PROJECT_CONTEXT_SETTINGS.json"
+
 
 DEFAULT_EXTENSIONS = {
     ".py",
@@ -43,6 +45,7 @@ DEFAULT_EXTENSIONS = {
     ".dockerignore",
 }
 
+
 EXPANDED_EXTENSIONS = DEFAULT_EXTENSIONS | {
     ".rst",
     ".log",
@@ -51,6 +54,7 @@ EXPANDED_EXTENSIONS = DEFAULT_EXTENSIONS | {
     ".template",
     ".lock",
 }
+
 
 ARCHIVE_EXTENSIONS = EXPANDED_EXTENSIONS | {
     ".java",
@@ -73,6 +77,7 @@ ARCHIVE_EXTENSIONS = EXPANDED_EXTENSIONS | {
     ".lua",
 }
 
+
 DEFAULT_EXCLUDE_DIRS = {
     ".git",
     ".venv",
@@ -90,6 +95,7 @@ DEFAULT_EXCLUDE_DIRS = {
     EXPORTS_DIRNAME,
 }
 
+
 DEFAULT_EXCLUDE_FILES = {
     CONTEXT_FILENAME,
     MANIFEST_FILENAME,
@@ -102,6 +108,7 @@ DEFAULT_EXCLUDE_FILES = {
     ".env.production",
     ".env.test",
 }
+
 
 DEFAULT_EXCLUDE_SUFFIXES = {
     ".pem",
@@ -127,15 +134,18 @@ DEFAULT_EXCLUDE_SUFFIXES = {
     ".rar",
 }
 
+
 PROFILE_STANDARD = "standard"
 PROFILE_EXPANDED = "expanded"
 PROFILE_ARCHIVE = "archive"
+
 
 VALID_PROFILES = {
     PROFILE_STANDARD,
     PROFILE_EXPANDED,
     PROFILE_ARCHIVE,
 }
+
 
 DEFAULT_MAX_FILE_BYTES = 350_000
 DEFAULT_MAX_TOTAL_BYTES = 5_000_000
@@ -147,15 +157,85 @@ ARCHIVE_MAX_FILE_BYTES = 1_000_000
 ARCHIVE_MAX_TOTAL_BYTES = 25_000_000
 
 
+def apply_standard_preset(settings: ScanSettings) -> ScanSettings:
+    """
+    Standard profile.
+
+    Fast everyday export.
+    Best for quick documentation, project overview, and lightweight AI context.
+    """
+
+    settings.include_snapshot_zip = True
+    settings.redact_sensitive_lines = True
+    settings.include_hashes = True
+    settings.include_line_counts = True
+    settings.include_folder_tree = True
+    settings.include_file_index = True
+
+    # Standard should stay lightweight.
+    settings.include_file_contents = False
+    settings.include_skipped_details = False
+
+    settings.timestamped_export_folder = True
+    settings.skipped_details_limit = 100
+
+    return settings
+
+
+def apply_expanded_preset(settings: ScanSettings) -> ScanSettings:
+    """
+    Expanded profile.
+
+    Fuller development review mode.
+    Best for AI-assisted development, project handoff, and code review.
+    """
+
+    settings.include_snapshot_zip = True
+    settings.redact_sensitive_lines = True
+    settings.include_hashes = True
+    settings.include_line_counts = True
+    settings.include_folder_tree = True
+    settings.include_file_index = True
+    settings.include_file_contents = True
+    settings.include_skipped_details = True
+    settings.timestamped_export_folder = True
+    settings.skipped_details_limit = 250
+
+    return settings
+
+
+def apply_archive_preset(settings: ScanSettings) -> ScanSettings:
+    """
+    Archive profile.
+
+    Maximum preservation mode.
+    Best for full archival snapshots, backup-style exports, and long-term records.
+    """
+
+    settings.include_snapshot_zip = True
+    settings.redact_sensitive_lines = True
+    settings.include_hashes = True
+    settings.include_line_counts = True
+    settings.include_folder_tree = True
+    settings.include_file_index = True
+    settings.include_file_contents = True
+    settings.include_skipped_details = True
+    settings.timestamped_export_folder = True
+    settings.skipped_details_limit = 500
+
+    return settings
+
+
 def settings_for_profile(profile: str) -> ScanSettings:
     """
     Build ScanSettings from a profile name.
 
     Profiles:
-    - standard: clean everyday project context export.
-    - expanded: includes more supporting files and a larger size budget.
-    - archive: broadest source-code-oriented archival profile.
+    - standard: quick everyday export.
+    - expanded: fuller development/code-review export.
+    - archive: broadest preservation-oriented export.
     """
+
     profile = profile.lower().strip()
 
     if profile not in VALID_PROFILES:
@@ -171,15 +251,18 @@ def settings_for_profile(profile: str) -> ScanSettings:
         settings.include_extensions = set(DEFAULT_EXTENSIONS)
         settings.max_file_bytes = DEFAULT_MAX_FILE_BYTES
         settings.max_total_bytes = DEFAULT_MAX_TOTAL_BYTES
+        settings = apply_standard_preset(settings)
 
     elif profile == PROFILE_EXPANDED:
         settings.include_extensions = set(EXPANDED_EXTENSIONS)
         settings.max_file_bytes = EXPANDED_MAX_FILE_BYTES
         settings.max_total_bytes = EXPANDED_MAX_TOTAL_BYTES
+        settings = apply_expanded_preset(settings)
 
     elif profile == PROFILE_ARCHIVE:
         settings.include_extensions = set(ARCHIVE_EXTENSIONS)
         settings.max_file_bytes = ARCHIVE_MAX_FILE_BYTES
         settings.max_total_bytes = ARCHIVE_MAX_TOTAL_BYTES
+        settings = apply_archive_preset(settings)
 
     return settings
