@@ -13,6 +13,11 @@ from typing import Any
 class ScanSettings:
     """
     User-adjustable settings for a build run.
+
+    require_complete_source:
+        When True, the scanner treats missing eligible source files
+        as a hard failure. This is intended for archive/preservation
+        mode where every eligible source file must be captured.
     """
 
     profile: str = "standard"
@@ -42,9 +47,10 @@ class ScanSettings:
     include_file_index: bool = True
     include_file_contents: bool = True
     include_skipped_details: bool = True
-
     timestamped_export_folder: bool = True
     skipped_details_limit: int = 250
+
+    require_complete_source: bool = False
 
     def to_jsonable(self) -> dict[str, Any]:
         """

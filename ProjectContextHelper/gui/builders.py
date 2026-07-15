@@ -6,7 +6,6 @@ import tkinter as tk
 
 from constants import settings_for_profile
 from core import create_context
-
 from models import (
     BuildResult,
     ScanSettings,
@@ -23,20 +22,27 @@ class GuiState:
     """
 
     selected_folder: tk.StringVar
+
     profile_var: tk.StringVar
+
     output_dir_var: tk.StringVar
+
     max_file_mb_var: tk.StringVar
     max_total_mb_var: tk.StringVar
     skipped_limit_var: tk.StringVar
 
     include_zip_var: tk.BooleanVar
     redact_var: tk.BooleanVar
+
     include_hashes_var: tk.BooleanVar
     include_line_counts_var: tk.BooleanVar
+
     include_tree_var: tk.BooleanVar
     include_index_var: tk.BooleanVar
+
     include_contents_var: tk.BooleanVar
     include_skipped_details_var: tk.BooleanVar
+
     timestamped_folder_var: tk.BooleanVar
 
     open_after_build_var: tk.BooleanVar
@@ -56,11 +62,16 @@ def make_gui_state() -> GuiState:
 
     return GuiState(
         selected_folder=tk.StringVar(value=""),
+
         profile_var=tk.StringVar(value="standard"),
 
-        output_dir_var=tk.StringVar(value="PROJECT_CONTEXT_EXPORTS"),
+        output_dir_var=tk.StringVar(
+            value="PROJECT_CONTEXT_EXPORTS"
+        ),
+
         max_file_mb_var=tk.StringVar(value="0.35"),
         max_total_mb_var=tk.StringVar(value="5"),
+
         skipped_limit_var=tk.StringVar(value="100"),
 
         include_zip_var=tk.BooleanVar(value=True),
@@ -113,8 +124,9 @@ def profile_description(profile: str) -> str:
     if profile == "archive":
         return (
             "archive: maximum preservation mode. Includes all "
-            "available export information and larger limits. "
-            "Best for backups, preservation, and long-term archives."
+            "available export information with substantially larger "
+            "limits. Best for backups, long-term preservation, "
+            "research archives, and full project records."
         )
 
     return "Unknown profile."
@@ -129,7 +141,9 @@ def apply_profile_defaults(
     v2.1.0 profile presets.
 
     NOTE:
+
     open_after_build_var is intentionally not modified.
+
     It is treated as a user preference rather than
     a profile setting.
     """
@@ -145,6 +159,7 @@ def apply_profile_defaults(
 
         state.max_file_mb_var.set("0.35")
         state.max_total_mb_var.set("5")
+
         state.skipped_limit_var.set("100")
 
         state.include_zip_var.set(True)
@@ -170,6 +185,7 @@ def apply_profile_defaults(
 
         state.max_file_mb_var.set("0.5")
         state.max_total_mb_var.set("10")
+
         state.skipped_limit_var.set("250")
 
         state.include_zip_var.set(True)
@@ -193,9 +209,10 @@ def apply_profile_defaults(
 
     elif profile == "archive":
 
-        state.max_file_mb_var.set("1")
-        state.max_total_mb_var.set("25")
-        state.skipped_limit_var.set("500")
+        state.max_file_mb_var.set("2")
+        state.max_total_mb_var.set("100")
+
+        state.skipped_limit_var.set("1000")
 
         state.include_zip_var.set(True)
         state.redact_var.set(True)
@@ -228,14 +245,38 @@ def build_settings_from_state(
         or "PROJECT_CONTEXT_EXPORTS"
     )
 
-    settings.include_snapshot_zip = state.include_zip_var.get()
-    settings.redact_sensitive_lines = state.redact_var.get()
-    settings.include_hashes = state.include_hashes_var.get()
-    settings.include_line_counts = state.include_line_counts_var.get()
-    settings.include_folder_tree = state.include_tree_var.get()
-    settings.include_file_index = state.include_index_var.get()
-    settings.include_file_contents = state.include_contents_var.get()
-    settings.include_skipped_details = state.include_skipped_details_var.get()
+    settings.include_snapshot_zip = (
+        state.include_zip_var.get()
+    )
+
+    settings.redact_sensitive_lines = (
+        state.redact_var.get()
+    )
+
+    settings.include_hashes = (
+        state.include_hashes_var.get()
+    )
+
+    settings.include_line_counts = (
+        state.include_line_counts_var.get()
+    )
+
+    settings.include_folder_tree = (
+        state.include_tree_var.get()
+    )
+
+    settings.include_file_index = (
+        state.include_index_var.get()
+    )
+
+    settings.include_file_contents = (
+        state.include_contents_var.get()
+    )
+
+    settings.include_skipped_details = (
+        state.include_skipped_details_var.get()
+    )
+
     settings.timestamped_export_folder = (
         state.timestamped_folder_var.get()
     )
@@ -245,7 +286,6 @@ def build_settings_from_state(
             float(state.max_file_mb_var.get())
             * 1_000_000
         )
-
     except ValueError:
         raise ValueError(
             "Max File MB must be numeric."
@@ -256,7 +296,6 @@ def build_settings_from_state(
             float(state.max_total_mb_var.get())
             * 1_000_000
         )
-
     except ValueError:
         raise ValueError(
             "Max Total MB must be numeric."
@@ -267,7 +306,6 @@ def build_settings_from_state(
             0,
             int(state.skipped_limit_var.get()),
         )
-
     except ValueError:
         raise ValueError(
             "Skipped Details Limit must be a whole number."
@@ -283,14 +321,19 @@ def run_project_build(
     Run the actual project context build from GUI state.
     """
 
-    folder = state.selected_folder.get().strip()
+    folder = (
+        state.selected_folder.get()
+        .strip()
+    )
 
     if not folder:
         raise ValueError(
             "Please select a project folder first."
         )
 
-    settings = build_settings_from_state(state)
+    settings = build_settings_from_state(
+        state
+    )
 
     result = create_context(
         Path(folder),

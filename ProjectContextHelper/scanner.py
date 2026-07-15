@@ -6,11 +6,18 @@ from models import (
     ScanSettings,
     SkipRecord,
 )
-
 from utils import (
     count_lines,
     sha256_file,
 )
+
+
+SOURCE_COMPLETENESS_FAILURE_REASONS = {
+    "file_too_large",
+    "total_size_limit",
+    "size_unavailable",
+    "read_unavailable",
+}
 
 
 def relative_string(
@@ -23,11 +30,11 @@ def relative_string(
     If the path is not inside the project root for any reason,
     return the absolute string form instead of crashing.
     """
+
     try:
         return str(
             path.relative_to(root)
         )
-
     except ValueError:
         return str(path)
 
@@ -40,11 +47,32 @@ def safe_size(
 
     If the size cannot be read, return None.
     """
+
     try:
         return path.stat().st_size
-
     except OSError:
         return None
+
+
+def can_read_text_file(
+    path: Path,
+) -> bool:
+    """
+    Return True if a file can be read as text.
+
+    This does not mean the text is semantically valid.
+    It only confirms that the exporter can read and preserve
+    the file contents without crashing.
+    """
+
+    try:
+        path.read_text(
+            encoding="utf-8",
+            errors="replace",
+        )
+        return True
+    except Exception:
+        return False
 
 
 def exclusion_reason(
@@ -57,9 +85,9 @@ def exclusion_reason(
 
     Returns None when the path is not excluded.
     """
+
     try:
         relative_parts = path.relative_to(root).parts
-
     except ValueError:
         return "outside_root"
 
@@ -78,6 +106,24 @@ def exclusion_reason(
     return None
 
 
+def is_configured_source_file(
+    path: Path,
+    settings: ScanSettings,
+) -> bool:
+    """
+    Return True when a file matches the configured source/text
+    extension list for the active profile.
+    """
+
+    suffix = path.suffix.lower()
+    name = path.name.lower()
+
+    return (
+        suffix in settings.include_extensions
+        or name in settings.include_extensions
+    )
+
+
 def should_include_file(
     path: Path,
     root: Path,
@@ -86,8 +132,10 @@ def should_include_file(
     """
     Return whether a file should be included.
 
-    Also returns a SkipRecord when the file is skipped for a known reason.
+    Also returns a SkipRecord when the file is skipped for
+    a known reason.
     """
+
     relative_path = relative_string(
         path,
         root,
@@ -109,12 +157,9 @@ def should_include_file(
             size_bytes=safe_size(path),
         )
 
-    suffix = path.suffix.lower()
-    name = path.name.lower()
-
-    if (
-        suffix not in settings.include_extensions
-        and name not in settings.include_extensions
+    if not is_configured_source_file(
+        path,
+        settings,
     ):
         return False, SkipRecord(
             relative_path=relative_path,
@@ -138,7 +183,67 @@ def should_include_file(
             size_bytes=size,
         )
 
+    if settings.include_file_contents:
+        if not can_read_text_file(path):
+            return False, SkipRecord(
+                relative_path=relative_path,
+                reason="read_unavailable",
+                size_bytes=size,
+            )
+
     return True, None
+
+
+def source_completeness_failures(
+    skipped_records: list[SkipRecord],
+) -> list[SkipRecord]:
+    """
+    Return skipped records that represent a failure to preserve
+    eligible source files.
+    """
+
+    return [
+        record
+        for record in skipped_records
+        if record.reason in SOURCE_COMPLETENESS_FAILURE_REASONS
+    ]
+
+
+def build_source_failure_message(
+    failures: list[SkipRecord],
+) -> str:
+    """
+    Build a readable hard-failure message for incomplete archive runs.
+    """
+
+    lines = [
+        "SOURCE COMPLETENESS CHECK FAILED",
+        "",
+        "Archive mode requires every eligible source/text file to be captured.",
+        "The build was stopped because one or more eligible files were not included.",
+        "",
+        "Skipped eligible source files:",
+    ]
+
+    for record in failures:
+        size_display = (
+            "unknown"
+            if record.size_bytes is None
+            else str(record.size_bytes)
+        )
+
+        lines.append(
+            f"- {record.relative_path} "
+            f"({record.reason}, {size_display} bytes)"
+        )
+
+    lines.append("")
+    lines.append(
+        "Increase the archive limits, remove the exclusion, "
+        "or fix the unreadable file before building a preservation snapshot."
+    )
+
+    return "\n".join(lines)
 
 
 def collect_included_files(
@@ -147,7 +252,13 @@ def collect_included_files(
 ) -> ScanResult:
     """
     Collect included files and skipped-file metadata.
+
+    In archive mode, source completeness is enforced.
+    If an eligible source/text file is skipped due to size,
+    total limit, unreadability, or missing size information,
+    the build fails.
     """
+
     included_paths: list[Path] = []
     included_records: list[FileRecord] = []
     skipped_records: list[SkipRecord] = []
@@ -217,6 +328,17 @@ def collect_included_files(
 
         total_bytes += size
 
+    failures = source_completeness_failures(
+        skipped_records
+    )
+
+    if settings.require_complete_source and failures:
+        raise ValueError(
+            build_source_failure_message(
+                failures
+            )
+        )
+
     return ScanResult(
         included_paths=included_paths,
         included_records=included_records,
@@ -234,6 +356,7 @@ def build_tree(
 
     Excluded folders and files are not shown in the tree.
     """
+
     lines: list[str] = [
         root.name + "/"
     ]
@@ -258,7 +381,6 @@ def build_tree(
                     item.name.lower(),
                 ),
             )
-
         except OSError:
             return
 

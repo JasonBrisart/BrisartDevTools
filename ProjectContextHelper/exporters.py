@@ -13,12 +13,58 @@ from constants import (
 from models import (
     ScanResult,
     ScanSettings,
+    SkipRecord,
 )
-from scanner import build_tree
+from scanner import (
+    SOURCE_COMPLETENESS_FAILURE_REASONS,
+    build_tree,
+)
 from utils import (
     language_hint,
     safe_read,
 )
+
+
+def source_completeness_report(
+    scan: ScanResult,
+    settings: ScanSettings,
+) -> dict:
+    """
+    Build a source completeness report.
+
+    This reports whether eligible source files were preserved.
+    Excluded files, ignored binary files, cache files, and unsupported
+    extensions are not counted as failures.
+    """
+
+    failures = [
+        record
+        for record in scan.skipped_records
+        if record.reason in SOURCE_COMPLETENESS_FAILURE_REASONS
+    ]
+
+    included_count = len(scan.included_records)
+    failed_count = len(failures)
+
+    status = (
+        "PASS"
+        if failed_count == 0
+        else "FAIL"
+    )
+
+    return {
+        "required": settings.require_complete_source,
+        "status": status,
+        "included_source_files": included_count,
+        "missing_or_blocked_source_files": failed_count,
+        "failure_reasons": sorted(
+            SOURCE_COMPLETENESS_FAILURE_REASONS
+        ),
+        "failures": [
+            asdict(record)
+            for record in failures
+        ],
+    }
 
 
 def build_manifest(
@@ -30,6 +76,7 @@ def build_manifest(
     """
     Build PROJECT_MANIFEST.json.
     """
+
     return {
         "created": created,
         "app_name": APP_NAME,
@@ -44,6 +91,10 @@ def build_manifest(
             "skipped_count": len(scan.skipped_records),
             "included_bytes": scan.total_included_bytes,
         },
+        "source_completeness": source_completeness_report(
+            scan,
+            settings,
+        ),
         "included_files": [
             asdict(record)
             for record in scan.included_records
@@ -55,6 +106,71 @@ def build_manifest(
     }
 
 
+def append_source_completeness_markdown(
+    chunks: list[str],
+    scan: ScanResult,
+    settings: ScanSettings,
+) -> None:
+    """
+    Append the Source Completeness Check section.
+    """
+
+    report = source_completeness_report(
+        scan,
+        settings,
+    )
+
+    chunks.append("## Source Completeness Check")
+    chunks.append("")
+    chunks.append(
+        f"- Requirement enabled: **{report['required']}**"
+    )
+    chunks.append(
+        f"- Status: **{report['status']}**"
+    )
+    chunks.append(
+        f"- Included source files: **{report['included_source_files']}**"
+    )
+    chunks.append(
+        "- Missing or blocked source files: "
+        f"**{report['missing_or_blocked_source_files']}**"
+    )
+    chunks.append("")
+
+    if report["status"] == "PASS":
+        chunks.append(
+            "Result: **PASS** — every eligible source/text file "
+            "that matched the active profile was included."
+        )
+        chunks.append("")
+        return
+
+    chunks.append(
+        "Result: **FAIL** — one or more eligible source/text files "
+        "could not be preserved."
+    )
+    chunks.append("")
+    chunks.append("| File | Reason | Bytes |")
+    chunks.append("|---|---|---:|")
+
+    for failure in report["failures"]:
+        size = failure.get("size_bytes")
+
+        size_display = (
+            ""
+            if size is None
+            else str(size)
+        )
+
+        chunks.append(
+            f"| `{failure['relative_path']}` "
+            f"| `{failure['reason']}` "
+            f"| {size_display} |"
+        )
+
+    chunks.append("")
+
+
 def build_context_markdown(
     root: Path,
     scan: ScanResult,
@@ -64,6 +180,7 @@ def build_context_markdown(
     """
     Build PROJECT_CONTEXT.md.
     """
+
     chunks: list[str] = []
 
     skip_counts = Counter(
@@ -92,7 +209,16 @@ def build_context_markdown(
     chunks.append(f"- Snapshot ZIP enabled: **{settings.include_snapshot_zip}**")
     chunks.append(f"- Hashes enabled: **{settings.include_hashes}**")
     chunks.append(f"- Line counts enabled: **{settings.include_line_counts}**")
+    chunks.append(
+        f"- Complete source required: **{settings.require_complete_source}**"
+    )
     chunks.append("")
+
+    append_source_completeness_markdown(
+        chunks,
+        scan,
+        settings,
+    )
 
     if skip_counts:
         chunks.append("## Skip Reason Summary")
@@ -136,7 +262,8 @@ def build_context_markdown(
             chunks.append("")
             chunks.append(
                 f"_Skipped details truncated. "
-                f"{remaining} additional skipped files are listed in PROJECT_MANIFEST.json._"
+                f"{remaining} additional skipped files are listed "
+                f"in PROJECT_MANIFEST.json._"
             )
 
         chunks.append("")
@@ -225,6 +352,7 @@ def build_summary_text(
     """
     Build PROJECT_SUMMARY.txt.
     """
+
     extension_counts = Counter(
         record.extension
         for record in scan.included_records
@@ -233,6 +361,11 @@ def build_summary_text(
     skip_counts = Counter(
         record.reason
         for record in scan.skipped_records
+    )
+
+    report = source_completeness_report(
+        scan,
+        settings,
     )
 
     lines: list[str] = []
@@ -254,6 +387,7 @@ def build_summary_text(
     lines.append(f"Folder tree: {settings.include_folder_tree}")
     lines.append(f"File index: {settings.include_file_index}")
     lines.append(f"File contents: {settings.include_file_contents}")
+    lines.append(f"Complete source required: {settings.require_complete_source}")
     lines.append("")
 
     lines.append("Summary")
@@ -263,6 +397,16 @@ def build_summary_text(
     lines.append(f"Included bytes: {scan.total_included_bytes}")
     lines.append("")
 
+    lines.append("Source Completeness")
+    lines.append("-------------------")
+    lines.append(f"Status: {report['status']}")
+    lines.append(f"Included source files: {report['included_source_files']}")
+    lines.append(
+        "Missing or blocked source files: "
+        f"{report['missing_or_blocked_source_files']}"
+    )
+    lines.append("")
+
     lines.append("Extensions")
     lines.append("----------")
 
@@ -270,7 +414,6 @@ def build_summary_text(
         lines.append(f"{ext}: {count}")
 
     lines.append("")
-
     lines.append("Skip Reasons")
     lines.append("------------")
 
@@ -296,6 +439,7 @@ def create_snapshot_zip(
     - generated export files
     - included project source files under project_files/
     """
+
     with zipfile.ZipFile(
         zip_path,
         "w",
@@ -305,17 +449,14 @@ def create_snapshot_zip(
             context_path,
             context_path.name,
         )
-
         archive.write(
             manifest_path,
             manifest_path.name,
         )
-
         archive.write(
             summary_path,
             summary_path.name,
         )
-
         archive.write(
             settings_path,
             settings_path.name,
