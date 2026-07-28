@@ -1,5 +1,7 @@
-# Generalized .gitignore
-# Part of The Brisart Ecosystem;)
+# ==================================================
+# The Brisart Ecosystem
+# Pure Python / Local First / Dependency Free
+# ==================================================
 
 # ---------------------------------------------------------------------------
 # Python
@@ -24,7 +26,9 @@ dist/
 .coverage.*
 htmlcov/
 
-# Virtual environments
+# ---------------------------------------------------------------------------
+# Virtual Environments
+# ---------------------------------------------------------------------------
 .venv/
 venv/
 env/
@@ -47,8 +51,50 @@ Thumbs.db
 desktop.ini
 
 # ---------------------------------------------------------------------------
-# ArchiveSnapshot generated / runtime files
+# Local Secrets
 # ---------------------------------------------------------------------------
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+
+# ---------------------------------------------------------------------------
+# Generic Cache / Temp / Logs
+# ---------------------------------------------------------------------------
+.cache/
+tmp/
+temp/
+*.tmp
+*.temp
+*.lock
+logs/
+*.log
+
+# ---------------------------------------------------------------------------
+# SQLite Databases
+# ---------------------------------------------------------------------------
+*.sqlite
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.db
+
+# ---------------------------------------------------------------------------
+# Project Context Helper
+# (shared export tool used across Brisart Ecosystem projects)
+# ---------------------------------------------------------------------------
+PROJECT_CONTEXT_EXPORTS/
+PROJECT_CONTEXT.md
+PROJECT_CONTEXT_SETTINGS.json
+PROJECT_MANIFEST.json
+PROJECT_SUMMARY.txt
+PROJECT_SNAPSHOT.zip
+
+
+# ==================================================
+# ArchiveSnapshot
+# ==================================================
 
 # Dated snapshot storage created inside archived source folders
 ARCHIVE_TIMELINE/
@@ -64,20 +110,31 @@ DAILY_SNAPSHOT_LOG.md
 # Project Context Helper inbox contents (staged files, not source)
 SNAPSHOT_ACTIVE/
 
-# ---------------------------------------------------------------------------
-# Project Context Helper exports (generated, not source)
-# ---------------------------------------------------------------------------
-PROJECT_CONTEXT_EXPORTS/
-PROJECT_CONTEXT.md
-PROJECT_CONTEXT_SETTINGS.json
-PROJECT_MANIFEST.json
-PROJECT_SUMMARY.txt
-PROJECT_SNAPSHOT.zip
 
-# ---------------------------------------------------------------------------
-# Miscellaneous local artifacts
-# ---------------------------------------------------------------------------
-*.tmp
-*.temp
-*.lock
-*.log
+# ==================================================
+# BrisartAI
+# ==================================================
+
+# Runtime data
+conversation_memory.sqlite3
+session_memory.sqlite3
+brisart_ai_index.sqlite3
+
+# Exported knowledge archives
+exports/
+archive_exports/
+knowledge_exports/
+
+# Future AI models
+models/
+downloads/
+
+# Future plugin cache
+plugins/cache/
+
+# Future crawl cache
+crawl_cache/
+web_cache/
+
+# Future scan cache
+scan_cache/
