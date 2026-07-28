@@ -1,2 +1,83 @@
-*.pyc
-/ProjectContextHelper
+# General .gitignore
+# Part of BrisartPreservationTools
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Type checkers / linters / test caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# ---------------------------------------------------------------------------
+# Editors / IDEs
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---------------------------------------------------------------------------
+# OS-generated files
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------------------
+# ArchiveSnapshot generated / runtime files
+# ---------------------------------------------------------------------------
+
+# Dated snapshot storage created inside archived source folders
+ARCHIVE_TIMELINE/
+
+# GUI application settings (per-machine, not part of source)
+ARCHIVE_SNAPSHOT_SETTINGS.json
+
+# Headless daily automation config/state/log (per-machine, not source)
+DAILY_SNAPSHOT_CONFIG.json
+DAILY_SNAPSHOT_STATE.json
+DAILY_SNAPSHOT_LOG.md
+
+# Project Context Helper inbox contents (staged files, not source)
+SNAPSHOT_ACTIVE/
+
+# ---------------------------------------------------------------------------
+# Project Context Helper exports (generated, not source)
+# ---------------------------------------------------------------------------
+PROJECT_CONTEXT_EXPORTS/
+PROJECT_CONTEXT.md
+PROJECT_CONTEXT_SETTINGS.json
+PROJECT_MANIFEST.json
+PROJECT_SUMMARY.txt
+PROJECT_SNAPSHOT.zip
+
+# ---------------------------------------------------------------------------
+# Miscellaneous local artifacts
+# ---------------------------------------------------------------------------
+*.tmp
+*.temp
+*.lock
+*.log
