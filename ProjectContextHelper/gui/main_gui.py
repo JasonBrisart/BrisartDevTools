@@ -7,11 +7,9 @@ from constants import (
     AUTHOR,
     REPOSITORY_URL,
 )
-
 from gui.builders import make_gui_state
 from gui.build_tab import create_build_tab
 from gui.options_tab import create_options_tab
-from gui.updates_tab import create_updates_tab
 from gui.about_tab import create_about_tab
 
 
@@ -21,6 +19,9 @@ def run_gui() -> None:
 
     This file intentionally stays small.
     Individual tabs live in their own modules.
+
+    The former Updates tab has been merged into the About tab, which
+    also performs the automatic startup update check.
     """
     window = tk.Tk()
     window.title(f"{APP_NAME} v{APP_VERSION}")
@@ -41,8 +42,8 @@ def run_gui() -> None:
     subheader = tk.Label(
         window,
         text=(
-            f"v{APP_VERSION} • "
-            f"{AUTHOR} • "
+            f"v{APP_VERSION} \u2022 "
+            f"{AUTHOR} \u2022 "
             f"{REPOSITORY_URL}"
         ),
         font=("Segoe UI", 9),
@@ -62,7 +63,6 @@ def run_gui() -> None:
 
     build_tab = tk.Frame(notebook)
     options_tab = tk.Frame(notebook)
-    updates_tab = tk.Frame(notebook)
     about_tab = tk.Frame(notebook)
 
     notebook.add(
@@ -74,10 +74,6 @@ def run_gui() -> None:
         text="Options",
     )
     notebook.add(
-        updates_tab,
-        text="Updates",
-    )
-    notebook.add(
         about_tab,
         text="About",
     )
@@ -87,20 +83,14 @@ def run_gui() -> None:
         window=window,
         state=state,
     )
-
     create_options_tab(
         parent=options_tab,
         state=state,
     )
-
-    run_update_check_gui = create_updates_tab(
-        parent=updates_tab,
+    startup_update_check = create_about_tab(
+        parent=about_tab,
         window=window,
         state=state,
-    )
-
-    create_about_tab(
-        parent=about_tab,
     )
 
     status_bar = tk.Label(
@@ -114,12 +104,6 @@ def run_gui() -> None:
         side="bottom",
         fill="x",
     )
-
-    def startup_update_check() -> None:
-        if state.check_updates_startup_var.get():
-            run_update_check_gui(
-                show_up_to_date=False,
-            )
 
     window.after(
         500,

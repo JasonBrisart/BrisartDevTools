@@ -36,22 +36,18 @@ def source_completeness_report(
     Excluded files, ignored binary files, cache files, and unsupported
     extensions are not counted as failures.
     """
-
     failures = [
         record
         for record in scan.skipped_records
         if record.reason in SOURCE_COMPLETENESS_FAILURE_REASONS
     ]
-
     included_count = len(scan.included_records)
     failed_count = len(failures)
-
     status = (
         "PASS"
         if failed_count == 0
         else "FAIL"
     )
-
     return {
         "required": settings.require_complete_source,
         "status": status,
@@ -76,7 +72,6 @@ def build_manifest(
     """
     Build PROJECT_MANIFEST.json.
     """
-
     return {
         "created": created,
         "app_name": APP_NAME,
@@ -114,12 +109,10 @@ def append_source_completeness_markdown(
     """
     Append the Source Completeness Check section.
     """
-
     report = source_completeness_report(
         scan,
         settings,
     )
-
     chunks.append("## Source Completeness Check")
     chunks.append("")
     chunks.append(
@@ -136,7 +129,6 @@ def append_source_completeness_markdown(
         f"**{report['missing_or_blocked_source_files']}**"
     )
     chunks.append("")
-
     if report["status"] == "PASS":
         chunks.append(
             "Result: **PASS** — every eligible source/text file "
@@ -144,7 +136,6 @@ def append_source_completeness_markdown(
         )
         chunks.append("")
         return
-
     chunks.append(
         "Result: **FAIL** — one or more eligible source/text files "
         "could not be preserved."
@@ -152,22 +143,18 @@ def append_source_completeness_markdown(
     chunks.append("")
     chunks.append("| File | Reason | Bytes |")
     chunks.append("|---|---|---:|")
-
     for failure in report["failures"]:
         size = failure.get("size_bytes")
-
         size_display = (
             ""
             if size is None
             else str(size)
         )
-
         chunks.append(
             f"| `{failure['relative_path']}` "
             f"| `{failure['reason']}` "
             f"| {size_display} |"
         )
-
     chunks.append("")
 
 
@@ -180,7 +167,6 @@ def build_context_markdown(
     """
     Build PROJECT_CONTEXT.md.
     """
-
     chunks: list[str] = []
 
     skip_counts = Counter(
@@ -196,7 +182,9 @@ def build_context_markdown(
     chunks.append(f"Repository: {REPOSITORY_URL}")
     chunks.append(f"Root: `{root}`")
     chunks.append(f"Profile: `{settings.profile}`")
-    chunks.append(f"Redaction enabled: `{settings.redact_sensitive_lines}`")
+    chunks.append(
+        f"Redaction enabled: `{settings.redact_sensitive_lines}`"
+    )
     chunks.append("")
 
     chunks.append("## Export Summary")
@@ -206,9 +194,13 @@ def build_context_markdown(
     chunks.append(f"- Included bytes: **{scan.total_included_bytes}**")
     chunks.append(f"- Max file bytes: **{settings.max_file_bytes}**")
     chunks.append(f"- Max total bytes: **{settings.max_total_bytes}**")
-    chunks.append(f"- Snapshot ZIP enabled: **{settings.include_snapshot_zip}**")
+    chunks.append(
+        f"- Snapshot ZIP enabled: **{settings.include_snapshot_zip}**"
+    )
     chunks.append(f"- Hashes enabled: **{settings.include_hashes}**")
-    chunks.append(f"- Line counts enabled: **{settings.include_line_counts}**")
+    chunks.append(
+        f"- Line counts enabled: **{settings.include_line_counts}**"
+    )
     chunks.append(
         f"- Complete source required: **{settings.require_complete_source}**"
     )
@@ -223,10 +215,8 @@ def build_context_markdown(
     if skip_counts:
         chunks.append("## Skip Reason Summary")
         chunks.append("")
-
         for reason, count in sorted(skip_counts.items()):
             chunks.append(f"- `{reason}`: {count}")
-
         chunks.append("")
 
     if settings.include_skipped_details and scan.skipped_records:
@@ -237,7 +227,6 @@ def build_context_markdown(
             0,
             settings.skipped_details_limit,
         )
-
         visible_records = scan.skipped_records[:limit]
 
         chunks.append("| File | Reason | Bytes |")
@@ -249,7 +238,6 @@ def build_context_markdown(
                 if record.size_bytes is None
                 else str(record.size_bytes)
             )
-
             chunks.append(
                 f"| `{record.relative_path}` "
                 f"| `{record.reason}` "
@@ -261,9 +249,9 @@ def build_context_markdown(
         if remaining > 0:
             chunks.append("")
             chunks.append(
-                f"_Skipped details truncated. "
+                "_Skipped details truncated. "
                 f"{remaining} additional skipped files are listed "
-                f"in PROJECT_MANIFEST.json._"
+                "in PROJECT_MANIFEST.json._"
             )
 
         chunks.append("")
@@ -286,35 +274,52 @@ def build_context_markdown(
         chunks.append("")
 
         if scan.included_records:
+            headers = ["File", "Bytes"]
+
+            if settings.include_line_counts:
+                headers.append("Lines")
+
             if settings.include_hashes:
-                chunks.append("| File | Bytes | Lines | SHA256 |")
-                chunks.append("|---|---:|---:|---|")
-            else:
-                chunks.append("| File | Bytes | Lines |")
-                chunks.append("|---|---:|---:|")
+                headers.append("SHA256")
+
+            chunks.append(
+                "| " + " | ".join(headers) + " |"
+            )
+
+            alignment = []
+            for header in headers:
+                if header in {"Bytes", "Lines"}:
+                    alignment.append("---:")
+                else:
+                    alignment.append("---")
+
+            chunks.append(
+                "| " + " | ".join(alignment) + " |"
+            )
 
             for record in scan.included_records:
-                lines = (
-                    ""
-                    if record.line_count is None
-                    else str(record.line_count)
-                )
+                cells = [
+                    f"`{record.relative_path}`",
+                    str(record.size_bytes),
+                ]
+
+                if settings.include_line_counts:
+                    cells.append(
+                        ""
+                        if record.line_count is None
+                        else str(record.line_count)
+                    )
 
                 if settings.include_hashes:
-                    sha = record.sha256 or ""
+                    cells.append(
+                        f"`{record.sha256}`"
+                        if record.sha256
+                        else ""
+                    )
 
-                    chunks.append(
-                        f"| `{record.relative_path}` "
-                        f"| {record.size_bytes} "
-                        f"| {lines} "
-                        f"| `{sha}` |"
-                    )
-                else:
-                    chunks.append(
-                        f"| `{record.relative_path}` "
-                        f"| {record.size_bytes} "
-                        f"| {lines} |"
-                    )
+                chunks.append(
+                    "| " + " | ".join(cells) + " |"
+                )
 
             chunks.append("")
         else:
@@ -352,24 +357,19 @@ def build_summary_text(
     """
     Build PROJECT_SUMMARY.txt.
     """
-
     extension_counts = Counter(
         record.extension
         for record in scan.included_records
     )
-
     skip_counts = Counter(
         record.reason
         for record in scan.skipped_records
     )
-
     report = source_completeness_report(
         scan,
         settings,
     )
-
     lines: list[str] = []
-
     lines.append(f"{APP_NAME} v{APP_VERSION}")
     lines.append(f"Created: {created}")
     lines.append(f"Author: {AUTHOR}")
@@ -377,7 +377,6 @@ def build_summary_text(
     lines.append(f"Root: {root}")
     lines.append(f"Profile: {settings.profile}")
     lines.append("")
-
     lines.append("Settings")
     lines.append("--------")
     lines.append(f"Snapshot ZIP: {settings.include_snapshot_zip}")
@@ -387,16 +386,16 @@ def build_summary_text(
     lines.append(f"Folder tree: {settings.include_folder_tree}")
     lines.append(f"File index: {settings.include_file_index}")
     lines.append(f"File contents: {settings.include_file_contents}")
-    lines.append(f"Complete source required: {settings.require_complete_source}")
+    lines.append(
+        f"Complete source required: {settings.require_complete_source}"
+    )
     lines.append("")
-
     lines.append("Summary")
     lines.append("-------")
     lines.append(f"Included files: {len(scan.included_records)}")
     lines.append(f"Skipped files: {len(scan.skipped_records)}")
     lines.append(f"Included bytes: {scan.total_included_bytes}")
     lines.append("")
-
     lines.append("Source Completeness")
     lines.append("-------------------")
     lines.append(f"Status: {report['status']}")
@@ -406,20 +405,15 @@ def build_summary_text(
         f"{report['missing_or_blocked_source_files']}"
     )
     lines.append("")
-
     lines.append("Extensions")
     lines.append("----------")
-
     for ext, count in sorted(extension_counts.items()):
         lines.append(f"{ext}: {count}")
-
     lines.append("")
     lines.append("Skip Reasons")
     lines.append("------------")
-
     for reason, count in sorted(skip_counts.items()):
         lines.append(f"{reason}: {count}")
-
     return "\n".join(lines)
 
 
@@ -439,7 +433,6 @@ def create_snapshot_zip(
     - generated export files
     - included project source files under project_files/
     """
-
     with zipfile.ZipFile(
         zip_path,
         "w",
@@ -461,10 +454,8 @@ def create_snapshot_zip(
             settings_path,
             settings_path.name,
         )
-
         for path in scan.included_paths:
             rel = path.relative_to(root)
-
             archive.write(
                 path,
                 f"project_files/{rel.as_posix()}",

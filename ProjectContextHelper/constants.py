@@ -1,14 +1,15 @@
 from models import ScanSettings
 
-
 APP_NAME = "Project Context Helper"
-APP_VERSION = "2.1.2"
+APP_VERSION = "2.1.5"
 AUTHOR = "Jason Brisart"
+
+# Release history now lives in changelog.py (single source of truth for
+# release notes). The About tab imports it from there.
 
 REPOSITORY_NAME = "BrisartDevTools"
 REPOSITORY_URL = "https://github.com/JasonBrisart/BrisartDevTools"
 RELEASES_URL = "https://github.com/JasonBrisart/BrisartDevTools/releases"
-
 UPDATE_CHECK_URL = (
     "https://api.github.com/repos/"
     "JasonBrisart/BrisartDevTools/releases/latest"
@@ -22,6 +23,26 @@ SUMMARY_FILENAME = "PROJECT_SUMMARY.txt"
 SNAPSHOT_FILENAME = "PROJECT_SNAPSHOT.zip"
 SETTINGS_FILENAME = "PROJECT_CONTEXT_SETTINGS.json"
 
+# ============================================================
+# Profiles
+#
+# Two profiles are supported:
+#   standard - fast, lightweight everyday export
+#   archive  - maximum preservation (default)
+#
+# The former "expanded" profile was removed in v2.1.4. Its
+# extra extensions were folded into the archive profile so
+# archive remains the true capture-everything mode.
+# ============================================================
+PROFILE_STANDARD = "standard"
+PROFILE_ARCHIVE = "archive"
+
+DEFAULT_PROFILE = PROFILE_ARCHIVE
+
+VALID_PROFILES = {
+    PROFILE_STANDARD,
+    PROFILE_ARCHIVE,
+}
 
 DEFAULT_EXTENSIONS = {
     ".py",
@@ -49,16 +70,16 @@ DEFAULT_EXTENSIONS = {
     ".dockerignore",
 }
 
-EXPANDED_EXTENSIONS = DEFAULT_EXTENSIONS | {
+# Archive folds in the extra documentation/config extensions that
+# used to live in the expanded profile, plus the broad source-code
+# extension set for maximum preservation.
+ARCHIVE_EXTENSIONS = DEFAULT_EXTENSIONS | {
     ".rst",
     ".log",
     ".env.example",
     ".sample",
     ".template",
     ".lock",
-}
-
-ARCHIVE_EXTENSIONS = EXPANDED_EXTENSIONS | {
     ".java",
     ".c",
     ".cpp",
@@ -133,35 +154,36 @@ DEFAULT_EXCLUDE_SUFFIXES = {
     ".rar",
 }
 
-PROFILE_STANDARD = "standard"
-PROFILE_EXPANDED = "expanded"
-PROFILE_ARCHIVE = "archive"
-
-VALID_PROFILES = {
-    PROFILE_STANDARD,
-    PROFILE_EXPANDED,
-    PROFILE_ARCHIVE,
-}
-
 DEFAULT_MAX_FILE_BYTES = 350_000
 DEFAULT_MAX_TOTAL_BYTES = 5_000_000
 
-EXPANDED_MAX_FILE_BYTES = 500_000
-EXPANDED_MAX_TOTAL_BYTES = 10_000_000
+ARCHIVE_MAX_FILE_BYTES = 2_000_000
+ARCHIVE_MAX_TOTAL_BYTES = 100_000_000
 
-ARCHIVE_MAX_FILE_BYTES = 100_000_000
-ARCHIVE_MAX_TOTAL_BYTES = 1_000_000_000
+STANDARD_SKIPPED_DETAILS_LIMIT = 100
+ARCHIVE_SKIPPED_DETAILS_LIMIT = 1000
+
+
+def apply_common_defaults(settings: ScanSettings) -> ScanSettings:
+    """
+    Apply shared default exclusion rules.
+    """
+    settings.exclude_dirs = set(DEFAULT_EXCLUDE_DIRS)
+    settings.exclude_files = set(DEFAULT_EXCLUDE_FILES)
+    settings.exclude_suffixes = set(DEFAULT_EXCLUDE_SUFFIXES)
+    return settings
 
 
 def apply_standard_preset(settings: ScanSettings) -> ScanSettings:
     """
     Standard profile.
-
     Fast everyday export.
     Best for quick documentation, project overview,
     and lightweight AI context.
     """
-
+    settings.include_extensions = set(DEFAULT_EXTENSIONS)
+    settings.max_file_bytes = DEFAULT_MAX_FILE_BYTES
+    settings.max_total_bytes = DEFAULT_MAX_TOTAL_BYTES
     settings.include_snapshot_zip = True
     settings.redact_sensitive_lines = True
     settings.include_hashes = False
@@ -171,48 +193,23 @@ def apply_standard_preset(settings: ScanSettings) -> ScanSettings:
     settings.include_file_contents = False
     settings.include_skipped_details = False
     settings.timestamped_export_folder = True
-    settings.skipped_details_limit = 100
+    settings.skipped_details_limit = STANDARD_SKIPPED_DETAILS_LIMIT
     settings.require_complete_source = False
-
-    return settings
-
-
-def apply_expanded_preset(settings: ScanSettings) -> ScanSettings:
-    """
-    Expanded profile.
-
-    Fuller development review mode.
-    Best for AI-assisted development,
-    project handoff,
-    and code review.
-    """
-
-    settings.include_snapshot_zip = True
-    settings.redact_sensitive_lines = True
-    settings.include_hashes = True
-    settings.include_line_counts = True
-    settings.include_folder_tree = True
-    settings.include_file_index = True
-    settings.include_file_contents = True
-    settings.include_skipped_details = True
-    settings.timestamped_export_folder = True
-    settings.skipped_details_limit = 250
-    settings.require_complete_source = False
-
     return settings
 
 
 def apply_archive_preset(settings: ScanSettings) -> ScanSettings:
     """
-    Archive profile.
-
+    Archive profile. Default profile.
     Maximum preservation mode.
 
     This mode requires complete source capture.
     If an eligible source file cannot be included,
     the build fails instead of producing a partial archive.
     """
-
+    settings.include_extensions = set(ARCHIVE_EXTENSIONS)
+    settings.max_file_bytes = ARCHIVE_MAX_FILE_BYTES
+    settings.max_total_bytes = ARCHIVE_MAX_TOTAL_BYTES
     settings.include_snapshot_zip = True
     settings.redact_sensitive_lines = True
     settings.include_hashes = True
@@ -222,9 +219,8 @@ def apply_archive_preset(settings: ScanSettings) -> ScanSettings:
     settings.include_file_contents = True
     settings.include_skipped_details = True
     settings.timestamped_export_folder = True
-    settings.skipped_details_limit = 1000
+    settings.skipped_details_limit = ARCHIVE_SKIPPED_DETAILS_LIMIT
     settings.require_complete_source = True
-
     return settings
 
 
@@ -234,71 +230,20 @@ def settings_for_profile(profile: str) -> ScanSettings:
 
     Profiles:
     - standard
-    - expanded
-    - archive
+    - archive (default)
     """
-
     profile = profile.lower().strip()
 
     if profile not in VALID_PROFILES:
-        raise ValueError(
-            f"Invalid profile: {profile}"
-        )
+        raise ValueError(f"Invalid profile: {profile}")
 
-    settings = ScanSettings(
-        profile=profile
-    )
-
-    settings.exclude_dirs = set(
-        DEFAULT_EXCLUDE_DIRS
-    )
-    settings.exclude_files = set(
-        DEFAULT_EXCLUDE_FILES
-    )
-    settings.exclude_suffixes = set(
-        DEFAULT_EXCLUDE_SUFFIXES
-    )
+    settings = ScanSettings(profile=profile)
+    settings = apply_common_defaults(settings)
 
     if profile == PROFILE_STANDARD:
-        settings.include_extensions = set(
-            DEFAULT_EXTENSIONS
-        )
-        settings.max_file_bytes = (
-            DEFAULT_MAX_FILE_BYTES
-        )
-        settings.max_total_bytes = (
-            DEFAULT_MAX_TOTAL_BYTES
-        )
-        settings = apply_standard_preset(
-            settings
-        )
+        return apply_standard_preset(settings)
 
-    elif profile == PROFILE_EXPANDED:
-        settings.include_extensions = set(
-            EXPANDED_EXTENSIONS
-        )
-        settings.max_file_bytes = (
-            EXPANDED_MAX_FILE_BYTES
-        )
-        settings.max_total_bytes = (
-            EXPANDED_MAX_TOTAL_BYTES
-        )
-        settings = apply_expanded_preset(
-            settings
-        )
+    if profile == PROFILE_ARCHIVE:
+        return apply_archive_preset(settings)
 
-    elif profile == PROFILE_ARCHIVE:
-        settings.include_extensions = set(
-            ARCHIVE_EXTENSIONS
-        )
-        settings.max_file_bytes = (
-            ARCHIVE_MAX_FILE_BYTES
-        )
-        settings.max_total_bytes = (
-            ARCHIVE_MAX_TOTAL_BYTES
-        )
-        settings = apply_archive_preset(
-            settings
-        )
-
-    return settings
+    raise ValueError(f"Invalid profile: {profile}")
