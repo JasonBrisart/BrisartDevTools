@@ -93,10 +93,14 @@ def safe_read(
         )
 
     except UnicodeDecodeError:
-        text = path.read_text(
-            encoding="utf-8",
-            errors="replace",
-        )
+        try:
+            text = path.read_text(
+                encoding="utf-8",
+                errors="replace",
+            )
+
+        except Exception as exc:
+            return f"[[Could not read file: {exc}]]"
 
     except Exception as exc:
         return f"[[Could not read file: {exc}]]"
