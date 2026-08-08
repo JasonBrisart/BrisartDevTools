@@ -1,0 +1,97 @@
+# ==========================================================================
+# Canonical .gitignore  --  SINGLE SOURCE OF TRUTH
+# --------------------------------------------------------------------------
+# This is the one file to edit. tools/sync_gitignore.py copies the block
+# below into a managed region inside every repo's .gitignore.
+#
+# Do NOT hand-edit the managed block inside an individual repo -- your edit
+# will be overwritten on the next sync. Edit THIS file, then run the sync.
+# Anything a repo adds OUTSIDE its managed block is preserved untouched.
+#
+# Add your own project-specific ignores in each repo BELOW the managed
+# block (under the "repo-specific ignores" separator), not here.
+# ==========================================================================
+
+# --- Python bytecode & caches ---
+__pycache__/
+*.py[cod]
+*$py.class
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Packaging / build artifacts ---
+build/
+dist/
+*.egg-info/
+.eggs/
+# PyInstaller drops a <name>.spec in the repo root when freezing to an exe.
+# Uncomment if your project packages a binary.
+# *.spec
+
+# --- Editors / IDEs ---
+.idea/
+.vscode/
+*.swp
+
+# --- OS / cloud-sync cruft ---
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# --- Microsoft Office lock / owner files ---
+~$*.doc
+~$*.docx
+~$*.xls
+~$*.xlsx
+~$*.ppt
+~$*.pptx
+
+# --- Temp / editor backups / merge leftovers ---
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+
+# --- Secrets & credentials (never commit) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+
+# --- Local databases / scratch ---
+*.sqlite
+*.sqlite3
+*.db
+
+# --- Logs (uncomment if your project should not track log files) ---
+# *.log
+
+# --- Optional: binary assets (opt in per repo if a repo ships no assets) ---
+# Left commented on purpose: some repos legitimately track screenshots,
+# icons, or release archives, so blanket-ignoring them here would be wrong.
+# Uncomment in the MASTER only if it should apply to every repo.
+# *.zip
+# *.7z
+# *.rar
+# *.exe
+# *.dll
+# *.so
+# *.dylib
