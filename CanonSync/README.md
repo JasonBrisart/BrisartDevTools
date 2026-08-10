@@ -11,6 +11,8 @@ Part of **BrisartDevTools**.
 - Local-first / offline. Never touches the network.
 - Safe by default: previews a plan first; nothing is written until you
   press **Apply**. Optional timestamped backups before any overwrite.
+- Per-repo **allow / block** so you can point at a whole folder and still
+  exempt individual repos.
 - Idempotent: re-running with no source change writes nothing.
 
 CanonSync is the successor to the earlier gitignore-only sync tool,
@@ -83,6 +85,24 @@ repo-specific part. Because it is destructive, `whole` items are
 
 ---
 
+## Allow / block repositories
+
+After a scan, every discovered repo appears in a checkable list:
+
+- **☑ checked = ALLOW** — the repo is included and gets written.
+- **☐ unchecked = BLOCK** — the repo is skipped entirely; nothing is
+  written to it. It still appears in the plan as **BLOCKED** so you can see
+  what was skipped.
+
+Click a repo's **Allow** cell (or press **Space** on the highlighted row)
+to toggle it. **Allow all** / **Block all** flip everything at once. This
+lets you aim CanonSync at your whole GitHub folder and still exempt a
+legacy repo, a vendored fork, etc.
+
+On the command line, block repos with `--block PATH` (repeatable).
+
+---
+
 ## Quick start (GUI)
 
 ```bash
@@ -95,14 +115,16 @@ python canonsync_gui.py
 3. **Repositories folder** — Browse to the folder that contains your repos
    (e.g. your GitHub directory), then **Scan**. Every immediate subfolder
    containing a `.git` is found.
-4. **Preview (dry run)** — the table shows, per repo and per file, what
-   would change: 🟢 CREATE, 🟠 UPDATE, ⚪ unchanged, 🔴 missing. Nothing is
-   written.
-5. *(Optional)* tick **Back up files before overwriting** to drop a
+4. **Allow / block repos** — every repo starts allowed (☑). Untick any you
+   want to skip, or use Allow all / Block all.
+5. **Preview (dry run)** — the table shows, per repo and per file, what
+   would change: 🟢 CREATE, 🟠 UPDATE, ⚪ unchanged, 🔴 missing, 🟡 BLOCKED.
+   Nothing is written.
+6. *(Optional)* tick **Back up files before overwriting** to drop a
    timestamped `.bak` beside each file it updates.
-6. **Apply** — enabled only when there are changes. It asks for
-   confirmation (with an extra warning if any whole-mode file is
-   selected), then writes.
+7. **Apply** — enabled only when there are changes. It asks for
+   confirmation (warning about whole-mode files and blocked repos), then
+   writes.
 
 ### Command line
 
@@ -115,8 +137,10 @@ python canonsync_core.py --discover /path/to/GitHub
 # Apply to every discovered repo
 python canonsync_core.py --discover /path/to/GitHub --apply
 
-# Apply, keeping a .bak of anything it overwrites
-python canonsync_core.py --discover /path/to/GitHub --apply --backup
+# Apply, but block a couple of repos, keeping backups
+python canonsync_core.py --discover /path/to/GitHub \
+    --block /path/to/GitHub/Legacy --block /path/to/GitHub/VendoredFork \
+    --apply --backup
 
 # Target specific repos instead of discovering
 python canonsync_core.py --repo ../ArchiveSnapshot --repo ../Entitle --apply
@@ -131,6 +155,7 @@ Options:
 - `--repo PATH`    — a target repo root (repeatable)
 - `--discover DIR` — auto-find git repos in the immediate subfolders of DIR
 - `--only a,b`     — restrict to these item names (default: all enabled)
+- `--block PATH`   — block/skip a repo (repeatable)
 - `--backup`       — write a timestamped `.bak` before overwriting a file
 - `--apply`        — actually write; without it, a safe dry run
 - `--version`      — print the version and exit
@@ -188,7 +213,7 @@ before publishing the file here.
 - **The marker string defines a block's identity.** If you change
   `BEGIN_MARKER` / `END_MARKER` in `canonsync_core.py` after rolling out,
   the next run won't recognize old blocks and will add a second one. Pick
-  the markers before wide use. (They are unchanged in 1.1.0.)
+  the markers before wide use. (They are unchanged since 1.0.0.)
 - **Discovery is one level deep.** `--discover` looks at the immediate
   subfolders of the folder you point at (plus that folder itself). Nested
   repos aren't found recursively — pass them with `--repo`.

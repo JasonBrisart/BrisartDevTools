@@ -5,10 +5,12 @@ canonsync_gui.py
 Tkinter GUI for CanonSync.
 
 Point it at a parent folder (e.g. your GitHub directory). It discovers
-every git repo inside, lets you choose which canonical files to sync
-(.gitignore, .editorconfig, .gitattributes, LICENSE, ...), previews
-exactly what would change per repo and per file, and writes on Apply.
+every git repo inside, lets you choose which canonical files to sync and
+which repos are allowed, previews exactly what would change per repo and
+per file, and writes on Apply.
 
+- Canonical files: tick the ones you want to sync.
+- Repositories: tick = ALLOW (gets written), untick = BLOCK (skipped).
 - "block" files keep each repo's own rules around the managed block.
 - "whole" files (LICENSE) are full replacements and are disabled by
   default in canonsync.config.json.
@@ -30,12 +32,15 @@ import canonsync_core as core
 
 DEFAULT_CONFIG = "canonsync.config.json"
 
+CHECK_ON = "\u2611"   # ☑
+CHECK_OFF = "\u2610"  # ☐
+
 STATUS_LABEL = {
     core.STATUS_CREATE: "CREATE",
     core.STATUS_UPDATE: "UPDATE",
     core.STATUS_UNCHANGED: "unchanged",
     core.STATUS_MISSING: "MISSING",
-    core.STATUS_SKIPPED: "skipped",
+    core.STATUS_SKIPPED: "BLOCKED",
 }
 
 STATUS_COLOR = {
@@ -43,7 +48,7 @@ STATUS_COLOR = {
     core.STATUS_UPDATE: "#b35c00",
     core.STATUS_UNCHANGED: "#666666",
     core.STATUS_MISSING: "#b00020",
-    core.STATUS_SKIPPED: "#666666",
+    core.STATUS_SKIPPED: "#8a6d00",
 }
 
 
@@ -55,13 +60,14 @@ class CanonSyncApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"{core.APP_NAME} v{core.APP_VERSION}")
-        self.geometry("900x640")
-        self.minsize(760, 540)
+        self.geometry("920x720")
+        self.minsize(780, 600)
 
         self.config_path = tk.StringVar(value=str(Path(DEFAULT_CONFIG).resolve()))
         self.parent_dir = tk.StringVar(value="")
         self.backup_var = tk.BooleanVar(value=False)
         self.repos: list[Path] = []
+        self.repo_allow: dict[str, bool] = {}  # str(repo) -> allowed?
         self.last_results: list[dict] = []
         self.item_vars: dict[str, tk.BooleanVar] = {}
         self.config_data: dict = {}
@@ -81,7 +87,7 @@ class CanonSyncApp(tk.Tk):
         ttk.Button(cfg, text="Browse…", command=self._pick_config).pack(side="left", padx=3, pady=6)
         ttk.Button(cfg, text="Reload", command=self._load_config_items).pack(side="left", padx=3, pady=6)
 
-        self.items_frame = ttk.LabelFrame(self, text="Canonical files to sync")
+        self.items_frame = ttk.LabelFrame(self, text="Canonical files to sync (checked = included)")
         self.items_frame.pack(fill="x", **pad)
 
         mid = ttk.LabelFrame(self, text="Repositories folder")
@@ -92,11 +98,41 @@ class CanonSyncApp(tk.Tk):
         ttk.Button(mid, text="Browse…", command=self._pick_parent).pack(side="left", padx=3, pady=6)
         ttk.Button(mid, text="Scan", command=self._scan).pack(side="left", padx=3, pady=6)
 
+        # -- checkable repo list --
+        repo_frame = ttk.LabelFrame(
+            self, text="Repositories  (checked = ALLOW / write · unchecked = BLOCK / skip)"
+        )
+        repo_frame.pack(fill="both", expand=True, **pad)
+
+        repo_bar = ttk.Frame(repo_frame)
+        repo_bar.pack(fill="x", padx=6, pady=(6, 0))
+        ttk.Button(repo_bar, text="Allow all", command=lambda: self._set_all_repos(True)).pack(side="left")
+        ttk.Button(repo_bar, text="Block all", command=lambda: self._set_all_repos(False)).pack(side="left", padx=4)
+        self.repo_count_var = tk.StringVar(value="No repos scanned yet.")
+        ttk.Label(repo_bar, textvariable=self.repo_count_var).pack(side="right")
+
+        self.repo_tree = ttk.Treeview(
+            repo_frame, columns=("allow", "repo"), show="headings", height=6
+        )
+        self.repo_tree.heading("allow", text="Allow")
+        self.repo_tree.heading("repo", text="Repository")
+        self.repo_tree.column("allow", width=70, anchor="center", stretch=False)
+        self.repo_tree.column("repo", width=760, anchor="w")
+        self.repo_tree.tag_configure("blocked", foreground="#8a6d00")
+        self.repo_tree.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=6)
+        self.repo_tree.bind("<Button-1>", self._on_repo_click)
+        self.repo_tree.bind("<space>", self._on_repo_space)
+
+        repo_scroll = ttk.Scrollbar(repo_frame, orient="vertical", command=self.repo_tree.yview)
+        repo_scroll.pack(side="left", fill="y", pady=6)
+        self.repo_tree.configure(yscrollcommand=repo_scroll.set)
+
+        # -- plan table --
         table = ttk.LabelFrame(self, text="Plan")
         table.pack(fill="both", expand=True, **pad)
 
         columns = ("status", "item", "repo")
-        self.tree = ttk.Treeview(table, columns=columns, show="headings", height=12)
+        self.tree = ttk.Treeview(table, columns=columns, show="headings", height=10)
         self.tree.heading("status", text="Action")
         self.tree.heading("item", text="File")
         self.tree.heading("repo", text="Repository")
@@ -161,6 +197,59 @@ class CanonSyncApp(tk.Tk):
     def _selected_items(self) -> set[str]:
         return {name for name, var in self.item_vars.items() if var.get()}
 
+    # -- repo allow/block -------------------------------------------------
+    def _repo_of_row(self, row: str) -> str:
+        return self.repo_tree.item(row, "values")[1]
+
+    def _render_repo_row(self, row: str) -> None:
+        repo = self._repo_of_row(row)
+        allowed = self.repo_allow.get(repo, True)
+        glyph = CHECK_ON if allowed else CHECK_OFF
+        self.repo_tree.item(
+            row, values=(glyph, repo), tags=() if allowed else ("blocked",)
+        )
+
+    def _toggle_repo(self, row: str) -> None:
+        repo = self._repo_of_row(row)
+        self.repo_allow[repo] = not self.repo_allow.get(repo, True)
+        self._render_repo_row(row)
+        self._update_repo_count()
+
+    def _on_repo_click(self, event) -> None:
+        if self.repo_tree.identify_region(event.x, event.y) != "cell":
+            return
+        col = self.repo_tree.identify_column(event.x)
+        row = self.repo_tree.identify_row(event.y)
+        if not row:
+            return
+        if col == "#1":  # only the Allow column toggles
+            self._toggle_repo(row)
+            return "break"
+
+    def _on_repo_space(self, event) -> None:
+        row = self.repo_tree.focus()
+        if row:
+            self._toggle_repo(row)
+            return "break"
+
+    def _set_all_repos(self, allowed: bool) -> None:
+        for row in self.repo_tree.get_children():
+            repo = self._repo_of_row(row)
+            self.repo_allow[repo] = allowed
+            self._render_repo_row(row)
+        self._update_repo_count()
+
+    def _update_repo_count(self) -> None:
+        total = len(self.repos)
+        allowed = sum(1 for r in self.repos if self.repo_allow.get(str(r), True))
+        self.repo_count_var.set(f"{allowed} allowed / {total - allowed} blocked / {total} total")
+
+    def _blocked_set(self) -> set[Path]:
+        return {r for r in self.repos if not self.repo_allow.get(str(r), True)}
+
+    def _allowed_repos(self) -> list[Path]:
+        return [r for r in self.repos if self.repo_allow.get(str(r), True)]
+
     # -- helpers ----------------------------------------------------------
     def _pick_parent(self) -> None:
         path = filedialog.askdirectory(title="Select the folder containing your repos")
@@ -194,16 +283,23 @@ class CanonSyncApp(tk.Tk):
 
         self.repos = core.discover_repos(root)
         self._clear_table()
+        for row in self.repo_tree.get_children():
+            self.repo_tree.delete(row)
+        self.repo_allow.clear()
         self.apply_btn.configure(state="disabled")
 
         if not self.repos:
+            self.repo_count_var.set("No repos found.")
             self.status_var.set("No git repos found in that folder.")
             messagebox.showinfo(core.APP_NAME, "No git repositories found (no .git in immediate subfolders).")
             return
 
         for repo in self.repos:
-            self.tree.insert("", "end", values=("(scan)", "", str(repo)))
-        self.status_var.set(f"Found {len(self.repos)} repo(s). Press Preview.")
+            key = str(repo)
+            self.repo_allow[key] = True  # default: allow
+            self.repo_tree.insert("", "end", values=(CHECK_ON, key))
+        self._update_repo_count()
+        self.status_var.set(f"Found {len(self.repos)} repo(s). Allow/block as needed, then Preview.")
 
     def _run(self, apply: bool) -> None:
         if not self.repos:
@@ -213,6 +309,9 @@ class CanonSyncApp(tk.Tk):
         if not only:
             messagebox.showwarning(core.APP_NAME, "Select at least one canonical file to sync.")
             return
+        if not self._allowed_repos():
+            messagebox.showwarning(core.APP_NAME, "Every repo is blocked. Allow at least one.")
+            return
 
         try:
             results = core.sync(
@@ -221,6 +320,7 @@ class CanonSyncApp(tk.Tk):
                 apply=apply,
                 only=only,
                 backup=self.backup_var.get(),
+                blocked=self._blocked_set(),
             )
         except Exception as exc:
             messagebox.showerror(core.APP_NAME, f"Sync failed:\n{exc}")
@@ -233,7 +333,8 @@ class CanonSyncApp(tk.Tk):
         verb = "Wrote" if apply else "Would change"
         self.status_var.set(
             f"{verb}: {c[core.STATUS_CREATE]} create, {c[core.STATUS_UPDATE]} update, "
-            f"{c[core.STATUS_UNCHANGED]} unchanged, {c[core.STATUS_MISSING]} missing."
+            f"{c[core.STATUS_UNCHANGED]} unchanged, {c[core.STATUS_MISSING]} missing, "
+            f"{c[core.STATUS_SKIPPED]} blocked."
         )
         has_changes = (c[core.STATUS_CREATE] + c[core.STATUS_UPDATE]) > 0
         self.apply_btn.configure(state=("normal" if (has_changes and not apply) else "disabled"))
@@ -263,13 +364,16 @@ class CanonSyncApp(tk.Tk):
                 f"\n\nNOTE: {', '.join(whole_selected)} use WHOLE mode and will "
                 "REPLACE the entire destination file in each repo."
             )
+        blocked = self._blocked_set()
+        if blocked:
+            warn += f"\n\n{len(blocked)} repo(s) are blocked and will be skipped."
         if self.backup_var.get():
             warn += "\n\nBackups: a timestamped .bak will be written before each overwrite."
 
         if not messagebox.askyesno(
             core.APP_NAME,
             f"Write {(c[core.STATUS_CREATE] + c[core.STATUS_UPDATE])} change(s) "
-            f"across the selected repos?{warn}",
+            f"across the allowed repos?{warn}",
         ):
             return
         self._run(apply=True)

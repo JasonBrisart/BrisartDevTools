@@ -1,6 +1,6 @@
 {
   "app": "CanonSync",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Declares which canonical files are synced into every repo, and how. 'block' mode injects a managed region and preserves each repo's own rules around it. 'whole' mode replaces the entire destination file (used for files with no repo-specific part, like LICENSE).",
   "items": [
     {

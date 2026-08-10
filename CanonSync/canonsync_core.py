@@ -21,6 +21,10 @@ What to sync, and in which mode, is declared in canonsync.config.json. This
 module is pure logic with no UI; it is imported by the GUI and can also be
 run as a CLI.
 
+Repos can be individually allowed or blocked. A blocked repo is reported as
+SKIPPED and never written -- useful when you point CanonSync at a whole
+GitHub folder but want to exempt a few repos.
+
 Design goals:
 - Pure standard library. No third-party dependencies.
 - Local-first / offline. Never touches the network.
@@ -40,7 +44,7 @@ from datetime import datetime
 from pathlib import Path
 
 APP_NAME = "CanonSync"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 BEGIN_MARKER = "# >>> CANONICAL (managed by CanonSync) - DO NOT EDIT >>>"
 END_MARKER = "# <<< CANONICAL <<<"
@@ -228,9 +232,13 @@ def sync(
     apply: bool,
     only: set[str] | None = None,
     backup: bool = False,
+    blocked: set[Path] | None = None,
 ) -> list[dict]:
     """
     Plan (and optionally apply) every enabled canonical item across repos.
+
+    A repo present in `blocked` is reported as SKIPPED for every item and is
+    never written, regardless of `apply`.
 
     Returns a flat list of result dicts:
         {"repo": Path, "item": str, "dest": str, "status": str,
@@ -239,10 +247,25 @@ def sync(
     items = enabled_items(config, only=only)
     # Pre-read sources once.
     sources = {item["name"]: read_source(item) for item in items}
+    blocked = blocked or set()
 
     results: list[dict] = []
     for repo in repos:
+        repo_blocked = repo in blocked
         for item in items:
+            if repo_blocked:
+                results.append(
+                    {
+                        "repo": repo,
+                        "item": item["name"],
+                        "dest": item["dest"],
+                        "status": STATUS_SKIPPED,
+                        "written": False,
+                        "backup": None,
+                    }
+                )
+                continue
+
             status, new_text = plan_item_for_repo(repo, item, sources[item["name"]])
             written = False
             backup_path: Path | None = None
@@ -313,6 +336,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo", action="append", default=[], help="A target repo root (repeatable).")
     parser.add_argument("--discover", default="", help="Parent folder to auto-discover repos in.")
     parser.add_argument("--only", default="", help="Comma-separated item names to sync (default: all enabled).")
+    parser.add_argument("--block", action="append", default=[], help="A repo path to block/skip (repeatable).")
     parser.add_argument("--backup", action="store_true", help="Write a timestamped .bak before overwriting a file.")
     parser.add_argument("--apply", action="store_true", help="Write changes. Without it, a dry run.")
     parser.add_argument("--version", action="version", version=f"{APP_NAME} v{APP_VERSION}")
@@ -324,26 +348,27 @@ def _cli(argv: list[str]) -> int:
     config = load_config(Path(args.config).expanduser().resolve())
     targets = _resolve_targets(args.repo, args.discover)
     only = {s.strip() for s in args.only.split(",") if s.strip()} or None
+    blocked = {Path(b).expanduser().resolve() for b in args.block}
 
     print(f"{APP_NAME} v{APP_VERSION}")
-    print(f"Mode:   {'APPLY' if args.apply else 'dry run (nothing written)'}")
-    print(f"Backup: {'on' if args.backup else 'off'}")
-    print(f"Items:  {', '.join(i['name'] for i in enabled_items(config, only)) or '(none enabled)'}")
-    print(f"Repos:  {len(targets)}")
+    print(f"Mode:    {'APPLY' if args.apply else 'dry run (nothing written)'}")
+    print(f"Backup:  {'on' if args.backup else 'off'}")
+    print(f"Items:   {', '.join(i['name'] for i in enabled_items(config, only)) or '(none enabled)'}")
+    print(f"Repos:   {len(targets)}  ({len(blocked)} blocked)")
     print()
 
     if not targets:
         print("No target repos. Pass --repo PATH and/or --discover PARENT_DIR.")
         return 1
 
-    results = sync(config, targets, apply=args.apply, only=only, backup=args.backup)
+    results = sync(config, targets, apply=args.apply, only=only, backup=args.backup, blocked=blocked)
 
     label = {
         STATUS_CREATE: "CREATE",
         STATUS_UPDATE: "UPDATE",
         STATUS_UNCHANGED: "ok",
         STATUS_MISSING: "MISSING",
-        STATUS_SKIPPED: "skip",
+        STATUS_SKIPPED: "BLOCKED",
     }
     for r in results:
         if r["status"] == STATUS_UNCHANGED:
@@ -357,7 +382,8 @@ def _cli(argv: list[str]) -> int:
     print()
     print(
         f"Summary: {c[STATUS_CREATE]} create, {c[STATUS_UPDATE]} update, "
-        f"{c[STATUS_UNCHANGED]} unchanged, {c[STATUS_MISSING]} missing."
+        f"{c[STATUS_UNCHANGED]} unchanged, {c[STATUS_MISSING]} missing, "
+        f"{c[STATUS_SKIPPED]} blocked."
     )
     if not args.apply and (c[STATUS_CREATE] or c[STATUS_UPDATE]):
         print("Dry run only. Re-run with --apply to write these changes.")
