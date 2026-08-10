@@ -11,23 +11,24 @@ exactly what would change per repo and per file, and writes on Apply.
 
 - "block" files keep each repo's own rules around the managed block.
 - "whole" files (LICENSE) are full replacements and are disabled by
-  default in canon.config.json.
+  default in canonsync.config.json.
+- Optionally writes a timestamped ".bak" before overwriting anything.
 
 Pure standard library (tkinter). Local-first. Nothing is written until you
 press Apply, and Apply asks for confirmation first.
 
 Run:  python canonsync_gui.py
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-import canon_core as core
+import canonsync_core as core
 
-DEFAULT_CONFIG = "canon.config.json"
+DEFAULT_CONFIG = "canonsync.config.json"
 
 STATUS_LABEL = {
     core.STATUS_CREATE: "CREATE",
@@ -36,6 +37,7 @@ STATUS_LABEL = {
     core.STATUS_MISSING: "MISSING",
     core.STATUS_SKIPPED: "skipped",
 }
+
 STATUS_COLOR = {
     core.STATUS_CREATE: "#0a7d28",
     core.STATUS_UPDATE: "#b35c00",
@@ -53,11 +55,12 @@ class CanonSyncApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"{core.APP_NAME} v{core.APP_VERSION}")
-        self.geometry("900x620")
-        self.minsize(760, 520)
+        self.geometry("900x640")
+        self.minsize(760, 540)
 
         self.config_path = tk.StringVar(value=str(Path(DEFAULT_CONFIG).resolve()))
         self.parent_dir = tk.StringVar(value="")
+        self.backup_var = tk.BooleanVar(value=False)
         self.repos: list[Path] = []
         self.last_results: list[dict] = []
         self.item_vars: dict[str, tk.BooleanVar] = {}
@@ -91,6 +94,7 @@ class CanonSyncApp(tk.Tk):
 
         table = ttk.LabelFrame(self, text="Plan")
         table.pack(fill="both", expand=True, **pad)
+
         columns = ("status", "item", "repo")
         self.tree = ttk.Treeview(table, columns=columns, show="headings", height=12)
         self.tree.heading("status", text="Action")
@@ -102,6 +106,7 @@ class CanonSyncApp(tk.Tk):
         for status, color in STATUS_COLOR.items():
             self.tree.tag_configure(status, foreground=color)
         self.tree.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=6)
+
         scroll = ttk.Scrollbar(table, orient="vertical", command=self.tree.yview)
         scroll.pack(side="left", fill="y", pady=6)
         self.tree.configure(yscrollcommand=scroll.set)
@@ -111,6 +116,9 @@ class CanonSyncApp(tk.Tk):
         ttk.Button(actions, text="Preview (dry run)", command=self._preview).pack(side="left", padx=6)
         self.apply_btn = ttk.Button(actions, text="Apply", command=self._apply, state="disabled")
         self.apply_btn.pack(side="left", padx=6)
+        ttk.Checkbutton(
+            actions, text="Back up files before overwriting", variable=self.backup_var
+        ).pack(side="left", padx=12)
         ttk.Button(actions, text="Quit", command=self.destroy).pack(side="right", padx=6)
 
         self.status_var = tk.StringVar(value="Load a config, pick a repos folder, then Scan.")
@@ -121,7 +129,7 @@ class CanonSyncApp(tk.Tk):
     # -- config / items ---------------------------------------------------
     def _pick_config(self) -> None:
         path = filedialog.askopenfilename(
-            title="Select canon.config.json", initialfile=DEFAULT_CONFIG
+            title="Select canonsync.config.json", initialfile=DEFAULT_CONFIG
         )
         if path:
             self.config_path.set(path)
@@ -131,12 +139,14 @@ class CanonSyncApp(tk.Tk):
         for child in self.items_frame.winfo_children():
             child.destroy()
         self.item_vars.clear()
+
         cfg_path = Path(self.config_path.get()).expanduser().resolve()
         try:
             self.config_data = core.load_config(cfg_path)
         except Exception as exc:
             messagebox.showerror(core.APP_NAME, f"Could not load config:\n{exc}")
             return
+
         for item in self.config_data.get("items", []):
             var = tk.BooleanVar(value=bool(item.get("enabled", True)))
             self.item_vars[item["name"]] = var
@@ -181,13 +191,16 @@ class CanonSyncApp(tk.Tk):
         if not root.exists():
             messagebox.showerror(core.APP_NAME, f"Folder does not exist:\n{root}")
             return
+
         self.repos = core.discover_repos(root)
         self._clear_table()
         self.apply_btn.configure(state="disabled")
+
         if not self.repos:
             self.status_var.set("No git repos found in that folder.")
             messagebox.showinfo(core.APP_NAME, "No git repositories found (no .git in immediate subfolders).")
             return
+
         for repo in self.repos:
             self.tree.insert("", "end", values=("(scan)", "", str(repo)))
         self.status_var.set(f"Found {len(self.repos)} repo(s). Press Preview.")
@@ -200,13 +213,22 @@ class CanonSyncApp(tk.Tk):
         if not only:
             messagebox.showwarning(core.APP_NAME, "Select at least one canonical file to sync.")
             return
+
         try:
-            results = core.sync(self.config_data, self.repos, apply=apply, only=only)
+            results = core.sync(
+                self.config_data,
+                self.repos,
+                apply=apply,
+                only=only,
+                backup=self.backup_var.get(),
+            )
         except Exception as exc:
             messagebox.showerror(core.APP_NAME, f"Sync failed:\n{exc}")
             return
+
         self.last_results = results
         self._fill_table(results)
+
         c = core.summarize(results)
         verb = "Wrote" if apply else "Would change"
         self.status_var.set(
@@ -215,8 +237,11 @@ class CanonSyncApp(tk.Tk):
         )
         has_changes = (c[core.STATUS_CREATE] + c[core.STATUS_UPDATE]) > 0
         self.apply_btn.configure(state=("normal" if (has_changes and not apply) else "disabled"))
+
         if apply:
-            messagebox.showinfo(core.APP_NAME, "Done. Changes written.")
+            backed_up = sum(1 for r in results if r.get("backup"))
+            extra = f" ({backed_up} backup file(s) written)" if backed_up else ""
+            messagebox.showinfo(core.APP_NAME, f"Done. Changes written.{extra}")
 
     def _preview(self) -> None:
         self._run(apply=False)
@@ -226,6 +251,7 @@ class CanonSyncApp(tk.Tk):
         if not c or (c[core.STATUS_CREATE] + c[core.STATUS_UPDATE]) == 0:
             messagebox.showinfo(core.APP_NAME, "Nothing to apply. Preview first.")
             return
+
         whole_selected = [
             i["name"]
             for i in core.enabled_items(self.config_data, only=self._selected_items())
@@ -237,6 +263,9 @@ class CanonSyncApp(tk.Tk):
                 f"\n\nNOTE: {', '.join(whole_selected)} use WHOLE mode and will "
                 "REPLACE the entire destination file in each repo."
             )
+        if self.backup_var.get():
+            warn += "\n\nBackups: a timestamped .bak will be written before each overwrite."
+
         if not messagebox.askyesno(
             core.APP_NAME,
             f"Write {(c[core.STATUS_CREATE] + c[core.STATUS_UPDATE])} change(s) "

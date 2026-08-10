@@ -10,7 +10,7 @@ Part of **BrisartDevTools**.
 - Pure standard library (Tkinter GUI + a plain-Python engine).
 - Local-first / offline. Never touches the network.
 - Safe by default: previews a plan first; nothing is written until you
-  press **Apply**.
+  press **Apply**. Optional timestamped backups before any overwrite.
 - Idempotent: re-running with no source change writes nothing.
 
 CanonSync is the successor to the earlier gitignore-only sync tool,
@@ -31,10 +31,11 @@ repo for you — without clobbering the rules a repo added for itself.
 
 ```
 CanonSync/
-├── canonsync_gui.py       # the GUI you run
-├── canon_core.py          # engine (imported by the GUI; also a CLI)
-├── canon.config.json      # declares WHAT syncs and HOW
-└── canon/                 # the canonical sources you edit
+├── canonsync_gui.py         # the GUI you run
+├── canonsync_core.py        # engine (imported by the GUI; also a CLI)
+├── canonsync.config.json    # declares WHAT syncs and HOW
+├── CHANGELOG.md             # version history
+└── canon/                   # the canonical sources you edit
     ├── gitignore.master
     ├── editorconfig.master
     ├── gitattributes.master
@@ -88,7 +89,7 @@ repo-specific part. Because it is destructive, `whole` items are
 python canonsync_gui.py
 ```
 
-1. **Canon config** — point at `canon.config.json` (auto-filled if it's
+1. **Canon config** — point at `canonsync.config.json` (auto-filled if it's
    beside the app). The canonical files it declares appear as checkboxes.
 2. **Tick the files** you want to sync.
 3. **Repositories folder** — Browse to the folder that contains your repos
@@ -97,43 +98,48 @@ python canonsync_gui.py
 4. **Preview (dry run)** — the table shows, per repo and per file, what
    would change: 🟢 CREATE, 🟠 UPDATE, ⚪ unchanged, 🔴 missing. Nothing is
    written.
-5. **Apply** — enabled only when there are changes. It asks for
-   confirmation (with an extra warning if any `whole`-mode file is
+5. *(Optional)* tick **Back up files before overwriting** to drop a
+   timestamped `.bak` beside each file it updates.
+6. **Apply** — enabled only when there are changes. It asks for
+   confirmation (with an extra warning if any whole-mode file is
    selected), then writes.
 
----
-
-## Command line
+### Command line
 
 The engine runs standalone for scripting or automation:
 
 ```bash
 # Preview across every repo in a folder (writes nothing)
-python canon_core.py --discover /path/to/GitHub
+python canonsync_core.py --discover /path/to/GitHub
 
 # Apply to every discovered repo
-python canon_core.py --discover /path/to/GitHub --apply
+python canonsync_core.py --discover /path/to/GitHub --apply
+
+# Apply, keeping a .bak of anything it overwrites
+python canonsync_core.py --discover /path/to/GitHub --apply --backup
 
 # Target specific repos instead of discovering
-python canon_core.py --repo ../ArchiveSnapshot --repo ../Entitle --apply
+python canonsync_core.py --repo ../ArchiveSnapshot --repo ../Entitle --apply
 
 # Sync only certain items by name
-python canon_core.py --discover /path/to/GitHub --only gitignore,editorconfig --apply
+python canonsync_core.py --discover /path/to/GitHub --only gitignore,editorconfig --apply
 ```
 
 Options:
 
-- `--config PATH`   — the config file (default: `canon.config.json`)
-- `--repo PATH`     — a target repo root (repeatable)
-- `--discover DIR`  — auto-find git repos in the immediate subfolders of DIR
-- `--only a,b`      — restrict to these item names (default: all enabled)
-- `--apply`         — actually write; without it, a safe dry run
+- `--config PATH`  — the config file (default: `canonsync.config.json`)
+- `--repo PATH`    — a target repo root (repeatable)
+- `--discover DIR` — auto-find git repos in the immediate subfolders of DIR
+- `--only a,b`     — restrict to these item names (default: all enabled)
+- `--backup`       — write a timestamped `.bak` before overwriting a file
+- `--apply`        — actually write; without it, a safe dry run
+- `--version`      — print the version and exit
 
 ---
 
 ## Configuring what syncs
 
-`canon.config.json` is a list of items:
+`canonsync.config.json` is a list of items:
 
 ```json
 {
@@ -156,21 +162,19 @@ source into `canon/`, add one item to the list, and it appears in the GUI
 automatically. `block` mode requires a `#`-comment-friendly destination so
 the markers are valid comments.
 
----
-
-## Enabling the LICENSE sync (read first)
+### Enabling the LICENSE sync (read first)
 
 The shipped `canon/LICENSE` is a **placeholder**, and its config item is
-`"enabled": false`. Because `whole` mode replaces the entire `LICENSE` in
+`"enabled": false`. Because whole mode replaces the entire LICENSE in
 every target repo, turn it on only after:
 
 1. Replacing `canon/LICENSE` with your actual license text.
 2. Confirming the same terms are correct for **every** repo you sync to —
    whole mode makes no exceptions.
-3. Setting `"enabled": true` for the `license` item in the config.
+3. Setting `"enabled": true` for the license item in the config.
 
 Authoritative licensing terms and governance are maintained separately in
-the licensing/governance repository; treat that as the definitive source
+the BrisartLicensing repository; treat that as the definitive source
 before publishing the file here.
 
 ---
@@ -182,14 +186,16 @@ before publishing the file here.
   artifact was committed before the rule existed, untrack it once with
   `git rm --cached <path>` and commit.
 - **The marker string defines a block's identity.** If you change
-  `BEGIN_MARKER` / `END_MARKER` in `canon_core.py` after rolling out, the
-  next run won't recognize old blocks and will add a second one. Pick the
-  markers before wide use.
+  `BEGIN_MARKER` / `END_MARKER` in `canonsync_core.py` after rolling out,
+  the next run won't recognize old blocks and will add a second one. Pick
+  the markers before wide use. (They are unchanged in 1.1.0.)
 - **Discovery is one level deep.** `--discover` looks at the immediate
   subfolders of the folder you point at (plus that folder itself). Nested
   repos aren't found recursively — pass them with `--repo`.
+- **Backups are local `.bak` files.** The canonical `.gitignore` ignores
+  `*.bak` so they won't be committed. Clean them up when you're satisfied.
 - **No network, ever.** CanonSync only reads and writes local files.
 
----
+See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 Created by Jason Brisart · Part of BrisartDevTools.

@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
 """
-canon_core.py
--------------
+canonsync_core.py
+-----------------
 Engine for CanonSync: keep a set of canonical files (the "canon") in sync
 across many git repos, from a single source of truth.
 
-CanonSync replaces the earlier gitignore-only tool. It syncs any number of
-declared files -- .gitignore, .editorconfig, .gitattributes, LICENSE, and
-so on -- each in one of two modes:
+CanonSync syncs any number of declared files -- .gitignore, .editorconfig,
+.gitattributes, LICENSE, and so on -- each in one of two modes:
 
 - "block":  Inject the canonical content into a delimited MANAGED BLOCK
             inside the destination file, preserving whatever that repo
             added around the block. Used for files that legitimately have
             both shared and repo-specific parts (.gitignore, .editorconfig,
             .gitattributes). Requires a '#'-comment-friendly destination.
-
 - "whole":  Replace the ENTIRE destination file with the canonical
             content. Used for files that have no repo-specific part, such
             as LICENSE. Nothing in the repo's copy is preserved.
 
-What to sync, and in which mode, is declared in canon.config.json. This
+What to sync, and in which mode, is declared in canonsync.config.json. This
 module is pure logic with no UI; it is imported by the GUI and can also be
 run as a CLI.
 
@@ -28,18 +26,21 @@ Design goals:
 - Local-first / offline. Never touches the network.
 - Safe by default. Callers preview a plan first; nothing is written until
   an explicit apply. "whole" items are disabled by default in the config
-  so a license can never be overwritten unintentionally.
+  so a license can never be overwritten unintentionally. An optional
+  backup writes a timestamped ".bak" before any file is overwritten.
 - Idempotent. Re-running with no source change writes nothing.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 APP_NAME = "CanonSync"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 BEGIN_MARKER = "# >>> CANONICAL (managed by CanonSync) - DO NOT EDIT >>>"
 END_MARKER = "# <<< CANONICAL <<<"
@@ -60,8 +61,8 @@ STATUS_SKIPPED = "skipped"
 # ---------------------------------------------------------------------------
 def load_config(config_path: Path) -> dict:
     """
-    Load canon.config.json and resolve each item's source path relative to
-    the config file's own directory.
+    Load canonsync.config.json and resolve each item's source path relative
+    to the config file's own directory.
     """
     if not config_path.exists():
         raise FileNotFoundError(f"Config not found: {config_path}")
@@ -157,12 +158,12 @@ def read_source(item: dict) -> str:
 def plan_item_for_repo(repo: Path, item: dict, source_text: str) -> tuple[str, str | None]:
     """
     Decide the action for one canonical item in one repo, without writing.
-
     Returns (status, new_text). new_text is None when nothing should be
     written.
     """
     if not repo.exists():
         return STATUS_MISSING, None
+
     dest = repo / item["dest"]
     mode = item.get("mode", MODE_BLOCK)
 
@@ -197,6 +198,7 @@ def discover_repos(root: Path) -> list[Path]:
         for child in sorted(root.iterdir()):
             if child.is_dir() and (child / ".git").exists():
                 found.append(child)
+
     seen: set[Path] = set()
     unique: list[Path] = []
     for repo in found:
@@ -206,17 +208,33 @@ def discover_repos(root: Path) -> list[Path]:
     return unique
 
 
+def _backup_existing(dest: Path) -> Path | None:
+    """
+    Copy an existing destination file to a timestamped ".bak" sibling before
+    it is overwritten. Returns the backup path, or None if there was nothing
+    to back up.
+    """
+    if not dest.exists():
+        return None
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = dest.with_name(f"{dest.name}.{stamp}.bak")
+    backup.write_text(dest.read_text(encoding="utf-8"), encoding="utf-8")
+    return backup
+
+
 def sync(
     config: dict,
     repos: list[Path],
     apply: bool,
     only: set[str] | None = None,
+    backup: bool = False,
 ) -> list[dict]:
     """
     Plan (and optionally apply) every enabled canonical item across repos.
 
     Returns a flat list of result dicts:
-        {"repo": Path, "item": str, "dest": str, "status": str, "written": bool}
+        {"repo": Path, "item": str, "dest": str, "status": str,
+         "written": bool, "backup": str | None}
     """
     items = enabled_items(config, only=only)
     # Pre-read sources once.
@@ -227,12 +245,16 @@ def sync(
         for item in items:
             status, new_text = plan_item_for_repo(repo, item, sources[item["name"]])
             written = False
+            backup_path: Path | None = None
             if (
                 apply
                 and new_text is not None
                 and status in (STATUS_CREATE, STATUS_UPDATE)
             ):
-                (repo / item["dest"]).write_text(new_text, encoding="utf-8")
+                dest = repo / item["dest"]
+                if backup and status == STATUS_UPDATE:
+                    backup_path = _backup_existing(dest)
+                dest.write_text(new_text, encoding="utf-8")
                 written = True
             results.append(
                 {
@@ -241,6 +263,7 @@ def sync(
                     "dest": item["dest"],
                     "status": status,
                     "written": written,
+                    "backup": str(backup_path) if backup_path else None,
                 }
             )
     return results
@@ -271,6 +294,7 @@ def _resolve_targets(repo_args: list[str], discover: str) -> list[Path]:
         targets.append(Path(repo).expanduser().resolve())
     if discover:
         targets.extend(discover_repos(Path(discover).expanduser().resolve()))
+
     seen: set[Path] = set()
     unique: list[Path] = []
     for target in targets:
@@ -282,14 +306,16 @@ def _resolve_targets(repo_args: list[str], discover: str) -> list[Path]:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="canon_core.py",
+        prog="canonsync_core.py",
         description=f"{APP_NAME} v{APP_VERSION} - sync canonical files across repos.",
     )
-    parser.add_argument("--config", default="canon.config.json", help="Path to canon.config.json.")
+    parser.add_argument("--config", default="canonsync.config.json", help="Path to canonsync.config.json.")
     parser.add_argument("--repo", action="append", default=[], help="A target repo root (repeatable).")
     parser.add_argument("--discover", default="", help="Parent folder to auto-discover repos in.")
     parser.add_argument("--only", default="", help="Comma-separated item names to sync (default: all enabled).")
+    parser.add_argument("--backup", action="store_true", help="Write a timestamped .bak before overwriting a file.")
     parser.add_argument("--apply", action="store_true", help="Write changes. Without it, a dry run.")
+    parser.add_argument("--version", action="version", version=f"{APP_NAME} v{APP_VERSION}")
     return parser
 
 
@@ -300,15 +326,18 @@ def _cli(argv: list[str]) -> int:
     only = {s.strip() for s in args.only.split(",") if s.strip()} or None
 
     print(f"{APP_NAME} v{APP_VERSION}")
-    print(f"Mode:  {'APPLY' if args.apply else 'dry run (nothing written)'}")
-    print(f"Items: {', '.join(i['name'] for i in enabled_items(config, only)) or '(none enabled)'}")
-    print(f"Repos: {len(targets)}")
+    print(f"Mode:   {'APPLY' if args.apply else 'dry run (nothing written)'}")
+    print(f"Backup: {'on' if args.backup else 'off'}")
+    print(f"Items:  {', '.join(i['name'] for i in enabled_items(config, only)) or '(none enabled)'}")
+    print(f"Repos:  {len(targets)}")
     print()
+
     if not targets:
         print("No target repos. Pass --repo PATH and/or --discover PARENT_DIR.")
         return 1
 
-    results = sync(config, targets, apply=args.apply, only=only)
+    results = sync(config, targets, apply=args.apply, only=only, backup=args.backup)
+
     label = {
         STATUS_CREATE: "CREATE",
         STATUS_UPDATE: "UPDATE",
@@ -319,7 +348,11 @@ def _cli(argv: list[str]) -> int:
     for r in results:
         if r["status"] == STATUS_UNCHANGED:
             continue
-        print(f"- {label[r['status']]:<8}{r['item']:<14}{r['repo']}")
+        line = f"- {label[r['status']]:<8}{r['item']:<14}{r['repo']}"
+        if r["backup"]:
+            line += f"  (backup: {Path(r['backup']).name})"
+        print(line)
+
     c = summarize(results)
     print()
     print(
