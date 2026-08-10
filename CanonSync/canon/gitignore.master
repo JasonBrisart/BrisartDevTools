@@ -1,8 +1,13 @@
 # ==========================================================================
+# Managed by CanonSync — canonical .gitignore (block mode)
+# Source of truth: canon/gitignore.master · Do not hand-edit inside a synced repo.
+# ==========================================================================
+
+# ==========================================================================
 # Canonical .gitignore  --  SINGLE SOURCE OF TRUTH
 # --------------------------------------------------------------------------
-# This is the one file to edit. tools/sync_gitignore.py copies the block
-# below into a managed region inside every repo's .gitignore.
+# This is the one file to edit. CanonSync copies the block below into a
+# managed region inside every repo's .gitignore.
 #
 # Do NOT hand-edit the managed block inside an individual repo -- your edit
 # will be overwritten on the next sync. Edit THIS file, then run the sync.
