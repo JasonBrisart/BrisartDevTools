@@ -1,3 +1,8 @@
+# ==========================================================================
+# Managed by CanonSync — canonical .gitattributes (block mode)
+# Source of truth: canon/gitattributes.master · Do not hand-edit inside a synced repo.
+# ==========================================================================
+
 # Canonical Git attributes. Add repo-specific rules (e.g. Git LFS
 # tracking for large binaries) BELOW the managed block.
 
