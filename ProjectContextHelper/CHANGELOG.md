@@ -1,30 +1,54 @@
 # Changelog
 
-## v2.1.5 - 2026-07-26
+All notable changes to Project Context Helper are documented here.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-- **Combined the About and Updates tabs into one**
-  - how: Removed gui/updates_tab.py and moved its controls into gui/about_tab.py; main_gui.py no longer creates a separate Updates tab.
-- **Added automatic update check and download on startup**
-  - how: updater.py gained resolve_download_url() and download_update(); the About tab runs the check ~500ms after launch when the startup toggle is enabled.
-- **Updates are staged, not silently applied**
-  - how: download_update() extracts the release into updates/v<version>/ (an excluded directory) and prompts for a restart instead of overwriting the running process.
-- **Reduced updates settings to a single startup toggle**
-  - how: Removed the manual 'Check for Updates' and 'Open Releases Page' buttons; only 'check on startup' remains.
+## [2.2.0] - 2026-08-11
 
-## v2.1.4 - 2026-07-26
+### Added
 
-- **Made 'archive' the default profile**
-  - how: Added DEFAULT_PROFILE = PROFILE_ARCHIVE in constants.py; the GUI Quick Export and the CLI --profile default now resolve to archive.
-- **Removed the 'expanded' profile**
-  - how: Dropped PROFILE_EXPANDED, apply_expanded_preset(), and the EXPANDED_* constants; VALID_PROFILES is now {standard, archive}.
-- **Folded expanded-only extensions into archive**
-  - how: The extra extensions (.rst, .log, .env.example, .sample, .template, .lock) were merged into ARCHIVE_EXTENSIONS so no coverage was lost.
+- **Real in-place auto-updater.** `updater.py` gained `find_release_root()`, `backup_application()`, `apply_extracted_update()`, `apply_staged_update()`, and `install_update()`. Together these extract a downloaded release and overwrite the running application's own files, rather than only staging the download as before.
+- **Every in-place update is backed up first.** `backup_application()` copies the current application files into `updates/backups/v<version>_<timestamp>/` before `apply_extracted_update()` overwrites anything, so a bad update can be reversed manually.
+- **CLI `--install-updates` flag.** Downloads, backs up, and applies an available update from the command line in one step (implies `--check-updates`).
 
-## v2.1.3 - 2026-07-26
+### Changed
 
-- **Centralized profile settings**
-  - how: The GUI now reads per-profile values from settings_for_profile() instead of duplicating them, removing drift between constants.py and gui/builders.py.
-- **Cleaned up the File Index table**
-  - how: build_context_markdown() now builds columns dynamically so 'Lines' and 'SHA256' only appear when their settings are enabled.
-- **Hardened scan records and metadata**
-  - how: Made FileRecord, SkipRecord, ScanResult, and BuildResult frozen; added a cached FileMeta and skip-reason constants in scanner.py.
+- **Auto-install is a separate, opt-in toggle.** Added `GuiState.auto_install_var`, defaulting to off. The existing "check for updates on startup" toggle still only downloads and stages by default; auto-install must be enabled separately before a staged update is applied over the running files.
+- **Updater never touches its own staging or export folders.** Introduced a shared `PROTECTED_NAMES` set (`updates/`, `PROJECT_CONTEXT_EXPORTS/`, `__pycache__`, `.git`, `download.zip`) that both the backup step and the apply step exclude.
+
+### Notes
+
+- In-place updates are overwrite-only: files present in the application directory but absent from the release are left untouched, never deleted.
+- Verified functionally before shipping: GitHub zipball wrapper unwrapping, flat packaged-release layout, backup content correctness, and `PROTECTED_NAMES` exclusion were each tested directly.
+
+## [2.1.5] - 2026-07-26
+
+### Added
+
+- **Automatic update check and download on startup.** `updater.py` gained `resolve_download_url()` and `download_update()`; the About tab runs the check ~500ms after launch when the startup toggle is enabled.
+
+### Changed
+
+- **Combined the About and Updates tabs into one.** Removed `gui/updates_tab.py` and moved its controls into `gui/about_tab.py`; `main_gui.py` no longer creates a separate Updates tab.
+- **Updates are staged, not silently applied.** `download_update()` extracts the release into `updates/v<version>/` (an excluded directory) and prompts for a restart instead of overwriting the running process.
+- **Reduced updates settings to a single startup toggle.** Removed the manual "Check for Updates" and "Open Releases Page" buttons; only "check on startup" remains.
+
+## [2.1.4] - 2026-07-26
+
+### Changed
+
+- **Made 'archive' the default profile.** Added `DEFAULT_PROFILE = PROFILE_ARCHIVE` in `constants.py`; the GUI Quick Export and the CLI `--profile` default now resolve to archive.
+- **Folded expanded-only extensions into archive.** The extra extensions (.rst, .log, .env.example, .sample, .template, .lock) were merged into `ARCHIVE_EXTENSIONS` so no coverage was lost.
+
+### Removed
+
+- **Removed the 'expanded' profile.** Dropped `PROFILE_EXPANDED`, `apply_expanded_preset()`, and the `EXPANDED_*` constants; `VALID_PROFILES` is now `{standard, archive}`.
+
+## [2.1.3] - 2026-07-26
+
+### Changed
+
+- **Centralized profile settings.** The GUI now reads per-profile values from `settings_for_profile()` instead of duplicating them, removing drift between `constants.py` and `gui/builders.py`.
+- **Cleaned up the File Index table.** `build_context_markdown()` now builds columns dynamically so 'Lines' and 'SHA256' only appear when their settings are enabled.
+- **Hardened scan records and metadata.** Made `FileRecord`, `SkipRecord`, `ScanResult`, and `BuildResult` frozen; added a cached `FileMeta` and skip-reason constants in `scanner.py`.

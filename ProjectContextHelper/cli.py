@@ -1,6 +1,5 @@
 from pathlib import Path
 import argparse
-
 from constants import (
     APP_NAME,
     APP_VERSION,
@@ -9,16 +8,15 @@ from constants import (
     settings_for_profile,
 )
 from core import create_context
-
 # GUI package import
 from gui.main_gui import run_gui
 from updater import (
+    apply_staged_update,
     check_for_updates,
+    download_update,
     open_releases_page,
 )
 from utils import normalize_extension
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=f"{APP_NAME} v{APP_VERSION}"
@@ -107,12 +105,20 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
     )
     parser.add_argument(
+        "--install-updates",
+        action="store_true",
+        help=(
+            "If a newer release is found, download it and apply it over "
+            "the current application files. A backup of the current "
+            "files is written under updates/backups/ before anything is "
+            "overwritten. Implies --check-updates."
+        ),
+    )
+    parser.add_argument(
         "--open-releases",
         action="store_true",
     )
     return parser
-
-
 def settings_from_args(args):
     settings = settings_for_profile(args.profile)
     if args.output_dir:
@@ -155,27 +161,37 @@ def settings_from_args(args):
     if args.flat_output:
         settings.timestamped_export_folder = False
     return settings
-
-
 def run_update_check(
     open_page_when_available: bool = False,
+    install: bool = False,
 ) -> None:
     info = check_for_updates()
     print(f"{APP_NAME} v{APP_VERSION}")
     print()
     print(info.message)
-    if info.update_available:
-        print(f"Release page: {info.release_url}")
+    if not info.update_available:
+        return
+    print(f"Release page: {info.release_url}")
+    if not install:
         if open_page_when_available:
             open_releases_page(info.release_url)
-
-
+        return
+    print()
+    print(f"Downloading update {info.latest_version}...")
+    staged_dir = download_update(info)
+    print(f"Staged in: {staged_dir}")
+    print("Backing up current files and applying update...")
+    result = apply_staged_update(staged_dir)
+    print(f"Backup written to: {result.backup_dir}")
+    print(f"Files updated: {len(result.applied_files)}")
+    print("Restart the application to run the new version.")
 def run_cli() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    if args.check_updates:
+    if args.check_updates or args.install_updates:
         run_update_check(
             open_page_when_available=args.open_releases,
+            install=args.install_updates,
         )
         if not args.root:
             return
@@ -202,11 +218,7 @@ def run_cli() -> None:
     print(f"Included Files: {result.included_count}")
     print(f"Skipped Files : {result.skipped_count}")
     print(f"Included Bytes: {result.total_included_bytes}")
-
-
 def main() -> None:
     run_cli()
-
-
 if __name__ == "__main__":
     main()

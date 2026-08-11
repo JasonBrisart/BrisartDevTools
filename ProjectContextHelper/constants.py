@@ -1,12 +1,7 @@
 from models import ScanSettings
-
 APP_NAME = "Project Context Helper"
-APP_VERSION = "2.1.5"
+APP_VERSION = "2.2.0"
 AUTHOR = "Jason Brisart"
-
-# Release history now lives in changelog.py (single source of truth for
-# release notes). The About tab imports it from there.
-
 REPOSITORY_NAME = "BrisartDevTools"
 REPOSITORY_URL = "https://github.com/JasonBrisart/BrisartDevTools"
 RELEASES_URL = "https://github.com/JasonBrisart/BrisartDevTools/releases"
@@ -14,15 +9,16 @@ UPDATE_CHECK_URL = (
     "https://api.github.com/repos/"
     "JasonBrisart/BrisartDevTools/releases/latest"
 )
-
 EXPORTS_DIRNAME = "PROJECT_CONTEXT_EXPORTS"
-
 CONTEXT_FILENAME = "PROJECT_CONTEXT.md"
 MANIFEST_FILENAME = "PROJECT_MANIFEST.json"
 SUMMARY_FILENAME = "PROJECT_SUMMARY.txt"
 SNAPSHOT_FILENAME = "PROJECT_SNAPSHOT.zip"
 SETTINGS_FILENAME = "PROJECT_CONTEXT_SETTINGS.json"
-
+# Local build history (recent exports across every project run through
+# the tool). Read by the About tab. Not part of any export bundle.
+BUILD_HISTORY_FILENAME = "build_history.json"
+MAX_HISTORY_ENTRIES = 50
 # ============================================================
 # Profiles
 #
@@ -36,14 +32,11 @@ SETTINGS_FILENAME = "PROJECT_CONTEXT_SETTINGS.json"
 # ============================================================
 PROFILE_STANDARD = "standard"
 PROFILE_ARCHIVE = "archive"
-
 DEFAULT_PROFILE = PROFILE_ARCHIVE
-
 VALID_PROFILES = {
     PROFILE_STANDARD,
     PROFILE_ARCHIVE,
 }
-
 DEFAULT_EXTENSIONS = {
     ".py",
     ".json",
@@ -69,7 +62,6 @@ DEFAULT_EXTENSIONS = {
     ".gitignore",
     ".dockerignore",
 }
-
 # Archive folds in the extra documentation/config extensions that
 # used to live in the expanded profile, plus the broad source-code
 # extension set for maximum preservation.
@@ -99,7 +91,6 @@ ARCHIVE_EXTENSIONS = DEFAULT_EXTENSIONS | {
     ".pl",
     ".lua",
 }
-
 DEFAULT_EXCLUDE_DIRS = {
     ".git",
     ".venv",
@@ -116,20 +107,19 @@ DEFAULT_EXCLUDE_DIRS = {
     "updates",
     EXPORTS_DIRNAME,
 }
-
 DEFAULT_EXCLUDE_FILES = {
     CONTEXT_FILENAME,
     MANIFEST_FILENAME,
     SUMMARY_FILENAME,
     SNAPSHOT_FILENAME,
     SETTINGS_FILENAME,
+    BUILD_HISTORY_FILENAME,
     ".env",
     ".env.local",
     ".env.development",
     ".env.production",
     ".env.test",
 }
-
 DEFAULT_EXCLUDE_SUFFIXES = {
     ".pem",
     ".key",
@@ -153,17 +143,12 @@ DEFAULT_EXCLUDE_SUFFIXES = {
     ".7z",
     ".rar",
 }
-
 DEFAULT_MAX_FILE_BYTES = 350_000
 DEFAULT_MAX_TOTAL_BYTES = 5_000_000
-
 ARCHIVE_MAX_FILE_BYTES = 2_000_000
 ARCHIVE_MAX_TOTAL_BYTES = 100_000_000
-
 STANDARD_SKIPPED_DETAILS_LIMIT = 100
 ARCHIVE_SKIPPED_DETAILS_LIMIT = 1000
-
-
 def apply_common_defaults(settings: ScanSettings) -> ScanSettings:
     """
     Apply shared default exclusion rules.
@@ -172,8 +157,6 @@ def apply_common_defaults(settings: ScanSettings) -> ScanSettings:
     settings.exclude_files = set(DEFAULT_EXCLUDE_FILES)
     settings.exclude_suffixes = set(DEFAULT_EXCLUDE_SUFFIXES)
     return settings
-
-
 def apply_standard_preset(settings: ScanSettings) -> ScanSettings:
     """
     Standard profile.
@@ -196,13 +179,10 @@ def apply_standard_preset(settings: ScanSettings) -> ScanSettings:
     settings.skipped_details_limit = STANDARD_SKIPPED_DETAILS_LIMIT
     settings.require_complete_source = False
     return settings
-
-
 def apply_archive_preset(settings: ScanSettings) -> ScanSettings:
     """
     Archive profile. Default profile.
     Maximum preservation mode.
-
     This mode requires complete source capture.
     If an eligible source file cannot be included,
     the build fails instead of producing a partial archive.
@@ -222,28 +202,20 @@ def apply_archive_preset(settings: ScanSettings) -> ScanSettings:
     settings.skipped_details_limit = ARCHIVE_SKIPPED_DETAILS_LIMIT
     settings.require_complete_source = True
     return settings
-
-
 def settings_for_profile(profile: str) -> ScanSettings:
     """
     Build ScanSettings from a profile name.
-
     Profiles:
     - standard
     - archive (default)
     """
     profile = profile.lower().strip()
-
     if profile not in VALID_PROFILES:
         raise ValueError(f"Invalid profile: {profile}")
-
     settings = ScanSettings(profile=profile)
     settings = apply_common_defaults(settings)
-
     if profile == PROFILE_STANDARD:
         return apply_standard_preset(settings)
-
     if profile == PROFILE_ARCHIVE:
         return apply_archive_preset(settings)
-
     raise ValueError(f"Invalid profile: {profile}")
