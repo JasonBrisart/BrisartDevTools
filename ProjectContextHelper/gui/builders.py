@@ -2,6 +2,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import tkinter as tk
+from app_settings import (
+    AppPreferences,
+    load_preferences,
+    save_preferences,
+)
 from constants import (
     DEFAULT_PROFILE,
     EXPORTS_DIRNAME,
@@ -58,18 +63,48 @@ def make_bool_var(
     Create a BooleanVar from a normal bool.
     """
     return tk.BooleanVar(value=bool(value))
+def wire_preference_autosave(
+    state: GuiState,
+) -> None:
+    """
+    Attach a write-through save to each persisted app-level
+    preference toggle, so a change takes effect on disk immediately
+    when the user clicks the checkbox, rather than requiring an
+    explicit "save settings" action or a clean application shutdown
+    to be recorded.
+    Without this, GuiState's BooleanVars only ever exist in memory:
+    open_after_build_var, check_updates_startup_var, and
+    auto_install_var would reset to their defaults every time the
+    app (or the compiled .exe) was reopened, regardless of what the
+    user had selected last time.
+    """
+    def persist(*_args) -> None:
+        save_preferences(
+            AppPreferences(
+                open_after_build=state.open_after_build_var.get(),
+                check_updates_startup=(
+                    state.check_updates_startup_var.get()
+                ),
+                auto_install_updates=state.auto_install_var.get(),
+            )
+        )
+    state.open_after_build_var.trace_add("write", persist)
+    state.check_updates_startup_var.trace_add("write", persist)
+    state.auto_install_var.trace_add("write", persist)
 def make_gui_state() -> GuiState:
     """
     Create the default GUI state.
     Default startup profile is archive (the maximum-preservation mode).
     Profile-controlled values are loaded from constants.py through
     settings_for_profile() so the GUI and CLI share one source of truth.
-    Both update-related toggles default to False: checking for
-    updates and, separately, auto-installing them in place are both
-    opt-in rather than on by default.
+    The three app-level preference toggles (open_after_build,
+    check_updates_startup, auto_install_updates) are restored from
+    app_settings.json if a saved value exists, and each is wired to
+    save itself immediately on change via wire_preference_autosave().
     """
     settings = settings_for_profile(DEFAULT_PROFILE)
-    return GuiState(
+    preferences = load_preferences()
+    state = GuiState(
         selected_folder=tk.StringVar(value=""),
         profile_var=tk.StringVar(value=settings.profile),
         output_dir_var=tk.StringVar(
@@ -97,13 +132,21 @@ def make_gui_state() -> GuiState:
         timestamped_folder_var=make_bool_var(
             settings.timestamped_export_folder
         ),
-        open_after_build_var=tk.BooleanVar(value=False),
-        check_updates_startup_var=tk.BooleanVar(value=False),
-        auto_install_var=tk.BooleanVar(value=False),
+        open_after_build_var=tk.BooleanVar(
+            value=preferences.open_after_build
+        ),
+        check_updates_startup_var=tk.BooleanVar(
+            value=preferences.check_updates_startup
+        ),
+        auto_install_var=tk.BooleanVar(
+            value=preferences.auto_install_updates
+        ),
         status_text=tk.StringVar(
             value="Select a project folder."
         ),
     )
+    wire_preference_autosave(state)
+    return state
 def profile_description(
     profile: str,
 ) -> str:

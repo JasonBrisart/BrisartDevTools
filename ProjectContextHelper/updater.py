@@ -2,9 +2,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import datetime
+import hashlib
 import io
 import json
 import shutil
+import subprocess
+import sys
 import urllib.error
 import urllib.request
 import webbrowser
@@ -16,19 +19,10 @@ from constants import (
     RELEASE_TAG_PREFIX,
     RELEASES_LIST_URL,
     RELEASES_URL,
+    STAGED_EXE_FILENAME,
 )
-# Downloaded updates are staged here, relative to the application directory.
-# This folder name is already part of DEFAULT_EXCLUDE_DIRS, so staged updates
-# never get swept into an export.
 UPDATES_DIRNAME = "updates"
-# Backups of the application's own files are written here before an update
-# is ever applied in place. Also under 'updates/', so it is excluded from
-# exports the same way staged downloads are.
 BACKUPS_DIRNAME = "backups"
-# Names that are never copied INTO the application directory during an
-# in-place update, and never copied FROM the application directory during
-# a pre-update backup. This keeps the updater from ever touching its own
-# staging area, backups, caches, or version control metadata.
 PROTECTED_NAMES = {
     UPDATES_DIRNAME,
     EXPORTS_DIRNAME,
@@ -36,10 +30,44 @@ PROTECTED_NAMES = {
     ".git",
     "download.zip",
 }
+def is_frozen() -> bool:
+    """
+    Return True when running as a PyInstaller-built executable.
+    PyInstaller sets sys.frozen = True at runtime in a built exe. This
+    is used throughout this module to decide between two entirely
+    different update mechanisms: swapping the compiled .exe itself
+    (frozen) versus overwriting .py source files in place (script /
+    development mode).
+    """
+    return bool(getattr(sys, "frozen", False))
+def application_dir() -> Path:
+    """
+    Return the directory that should be treated as this application's
+    own persistent folder, for settings, history, and update purposes.
+    When running as a normal Python script, this is the folder
+    containing this module (__file__). When running as a frozen
+    PyInstaller executable — especially a --onefile build — __file__
+    instead resolves to a temporary extraction folder (sys._MEIPASS)
+    that PyInstaller deletes the moment the process exits. Anything
+    written there (settings, history, update backups) would silently
+    vanish on every run. In frozen mode this returns the folder that
+    actually contains the running .exe file instead, which persists
+    across launches.
+    """
+    if is_frozen():
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
 @dataclass(slots=True)
 class UpdateInfo:
     """
     Result of an update check.
+    asset_kind is "exe" when a compiled .exe release asset was found
+    and selected (used when running as a frozen executable), or "zip"
+    when a packaged .zip asset or GitHub's auto-generated source
+    zipball was selected (used in script/development mode).
+    asset_digest holds the asset's published checksum, formatted as
+    GitHub provides it (e.g. "sha256:<hex>"), when available. Empty
+    string if no digest was published for this asset.
     """
     update_available: bool
     current_version: str
@@ -47,10 +75,13 @@ class UpdateInfo:
     message: str
     release_url: str
     download_url: str = ""
+    asset_kind: str = "zip"
+    asset_digest: str = ""
 @dataclass(slots=True)
 class InstallResult:
     """
-    Result of applying a staged update in place.
+    Result of applying a staged source-file update in place.
+    Only used for the script/dev-mode (non-frozen) update path.
     """
     backup_dir: Path
     staged_dir: Path
@@ -61,7 +92,7 @@ def normalize_version(value: str) -> tuple[int, ...]:
     Convert version strings such as:
     2.0.0
     v2.1.5
-    release-1.4
+    project-context-helper-v2.2.0
     into a comparable tuple.
     """
     cleaned = ""
@@ -80,34 +111,14 @@ def is_newer_version(
     latest: str,
     current: str,
 ) -> bool:
-    """
-    Return True if latest is newer than current.
-    """
     return normalize_version(latest) > normalize_version(current)
 def version_slug(value: str) -> str:
-    """
-    Build a filesystem-safe folder name from a version string.
-    """
     slug = "".join(
         char
         for char in value
         if char.isalnum() or char in {".", "-", "_"}
     )
     return slug or "latest"
-def resolve_download_url(payload: dict) -> str:
-    """
-    Pick the best download URL from a GitHub release payload.
-    Prefers a packaged .zip release asset, then falls back to the
-    auto-generated source zipball.
-    """
-    assets = payload.get("assets") or []
-    for asset in assets:
-        name = (asset.get("name") or "").lower()
-        if name.endswith(".zip"):
-            url = asset.get("browser_download_url")
-            if url:
-                return url
-    return payload.get("zipball_url") or ""
 def find_latest_release_payload(
     releases: list[dict],
     tag_prefix: str,
@@ -127,6 +138,41 @@ def find_latest_release_payload(
         if tag_name.startswith(tag_prefix):
             return release
     return None
+def resolve_asset(
+    payload: dict,
+) -> tuple[str, str, str]:
+    """
+    Pick the best downloadable asset from a release payload.
+    Returns (download_url, kind, digest):
+      kind is "exe" when a compiled .exe asset was selected, or "zip"
+      otherwise. digest is the asset's published checksum string
+      (e.g. "sha256:<hex>") if GitHub provided one, else "".
+    When running as a frozen executable, a .exe asset is strongly
+    preferred: a compiled exe cannot apply a source-file update to
+    itself, so a .zip would be useless here even if one is attached.
+    In script/dev mode, a packaged .zip asset is preferred, falling
+    back to GitHub's auto-generated source zipball if no .zip asset
+    was attached to the release.
+    """
+    assets = payload.get("assets") or []
+    if is_frozen():
+        for asset in assets:
+            name = (asset.get("name") or "").lower()
+            if name.endswith(".exe"):
+                return (
+                    asset.get("browser_download_url") or "",
+                    "exe",
+                    asset.get("digest") or "",
+                )
+    for asset in assets:
+        name = (asset.get("name") or "").lower()
+        if name.endswith(".zip"):
+            return (
+                asset.get("browser_download_url") or "",
+                "zip",
+                asset.get("digest") or "",
+            )
+    return payload.get("zipball_url") or "", "zip", ""
 def check_for_updates(
     timeout_seconds: int = 6,
 ) -> UpdateInfo:
@@ -141,17 +187,13 @@ def check_for_updates(
     try:
         request = urllib.request.Request(
             RELEASES_LIST_URL,
-            headers={
-                "User-Agent": APP_NAME.replace(" ", "")
-            },
+            headers={"User-Agent": APP_NAME.replace(" ", "")},
         )
         with urllib.request.urlopen(
             request,
             timeout=timeout_seconds,
         ) as response:
-            releases = json.loads(
-                response.read().decode("utf-8")
-            )
+            releases = json.loads(response.read().decode("utf-8"))
         payload = find_latest_release_payload(
             releases,
             RELEASE_TAG_PREFIX,
@@ -172,37 +214,31 @@ def check_for_updates(
             or payload.get("name")
             or APP_VERSION
         )
-        release_url = (
-            payload.get("html_url")
-            or RELEASES_URL
-        )
-        download_url = resolve_download_url(payload)
-        if is_newer_version(
-            latest_version,
-            APP_VERSION,
-        ):
+        release_url = payload.get("html_url") or RELEASES_URL
+        download_url, asset_kind, asset_digest = resolve_asset(payload)
+        if is_newer_version(latest_version, APP_VERSION):
             return UpdateInfo(
                 update_available=True,
                 current_version=APP_VERSION,
                 latest_version=latest_version,
                 message=(
-                    f"Update available: "
-                    f"{latest_version} "
+                    f"Update available: {latest_version} "
                     f"(current: {APP_VERSION})"
                 ),
                 release_url=release_url,
                 download_url=download_url,
+                asset_kind=asset_kind,
+                asset_digest=asset_digest,
             )
         return UpdateInfo(
             update_available=False,
             current_version=APP_VERSION,
             latest_version=latest_version,
-            message=(
-                f"You are running the latest version "
-                f"({APP_VERSION})."
-            ),
+            message=f"You are running the latest version ({APP_VERSION}).",
             release_url=release_url,
             download_url=download_url,
+            asset_kind=asset_kind,
+            asset_digest=asset_digest,
         )
     except urllib.error.URLError as exc:
         return UpdateInfo(
@@ -220,30 +256,44 @@ def check_for_updates(
             message=f"Update check failed: {exc}",
             release_url=RELEASES_URL,
         )
-def application_dir() -> Path:
+def verify_digest(
+    data: bytes,
+    digest: str,
+) -> None:
     """
-    Return the directory the application package lives in.
+    Verify downloaded bytes against a GitHub asset digest string, such
+    as "sha256:<hex>". Raises ValueError on mismatch. Silently returns
+    if no digest was published (nothing to verify against), or if the
+    digest is in an unrecognized format.
     """
-    return Path(__file__).resolve().parent
+    if not digest or ":" not in digest:
+        return
+    algorithm, _, expected = digest.partition(":")
+    algorithm = algorithm.lower().strip()
+    expected = expected.lower().strip()
+    if algorithm != "sha256":
+        return
+    actual = hashlib.sha256(data).hexdigest().lower()
+    if actual != expected:
+        raise ValueError(
+            "Downloaded update failed checksum verification. "
+            f"Expected {expected}, got {actual}."
+        )
+# ============================================================
+# Script / dev-mode update path (overwrites .py source files)
+# ============================================================
 def download_update(
     info: UpdateInfo,
     dest_dir: Path | None = None,
     timeout_seconds: int = 60,
 ) -> Path:
     """
-    Download and extract an available update into a staging folder.
-    The release archive is downloaded and, when it is a valid ZIP,
-    extracted into a versioned folder under the application's
-    'updates/' directory. This step only stages the files; it does
-    not touch the running application. Use apply_staged_update() (or
-    install_update()) to actually copy the staged files over the
-    application in place.
-    Returns the staging directory the update was written to.
+    Download and extract a .zip release update into a staging folder.
+    Only used for asset_kind == "zip" (script/dev mode). For
+    asset_kind == "exe", use stage_exe_update() instead.
     """
     if not info.download_url:
-        raise ValueError(
-            "No download URL is available for this release."
-        )
+        raise ValueError("No download URL is available for this release.")
     if dest_dir is None:
         dest_dir = (
             application_dir()
@@ -253,22 +303,21 @@ def download_update(
     dest_dir.mkdir(parents=True, exist_ok=True)
     request = urllib.request.Request(
         info.download_url,
-        headers={
-            "User-Agent": APP_NAME.replace(" ", "")
-        },
+        headers={"User-Agent": APP_NAME.replace(" ", "")},
     )
     with urllib.request.urlopen(
         request,
         timeout=timeout_seconds,
     ) as response:
         data = response.read()
+    if info.asset_digest:
+        verify_digest(data, info.asset_digest)
     archive_path = dest_dir / "download.zip"
     archive_path.write_bytes(data)
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             archive.extractall(dest_dir)
     except zipfile.BadZipFile:
-        # Not a zip payload; leave the raw download in place.
         pass
     return dest_dir
 def find_release_root(extract_dir: Path) -> Path:
@@ -278,9 +327,6 @@ def find_release_root(extract_dir: Path) -> Path:
     top-level folder such as 'JasonBrisart-BrisartDevTools-<sha>/'.
     A packaged release .zip asset, by contrast, usually places files
     directly at the archive root alongside download.zip.
-    This returns whichever directory actually contains the update's
-    files, so callers do not need to know which packaging style a
-    given release used.
     """
     candidates = [
         entry
@@ -296,23 +342,14 @@ def backup_application(
     backup_root: Path | None = None,
 ) -> Path:
     """
-    Copy the current application files into a timestamped backup
-    folder before an update is applied in place.
-    This is the safety net for in-place updates: if an update is
-    bad, unwanted, or applied incorrectly, the previous version's
-    files remain available to be copied back manually.
-    Returns the backup directory path.
+    Copy the current application's .py source files into a
+    timestamped backup folder before an in-place source update is
+    applied. Script/dev-mode safety net only.
     """
-    stamp = (
-        datetime.datetime.now()
-        .strftime("%Y%m%d_%H%M%S")
-    )
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     if backup_root is None:
         backup_root = app_dir / UPDATES_DIRNAME / BACKUPS_DIRNAME
-    backup_dir = (
-        backup_root
-        / f"v{version_slug(current_version)}_{stamp}"
-    )
+    backup_dir = backup_root / f"v{version_slug(current_version)}_{stamp}"
     backup_dir.mkdir(parents=True, exist_ok=True)
     for entry in app_dir.iterdir():
         if entry.name in PROTECTED_NAMES:
@@ -335,12 +372,7 @@ def apply_extracted_update(
     """
     Copy every file from an extracted update over the running
     application directory, overwriting existing files in place.
-    This is an overwrite-copy, not a mirror/sync: files present in
-    app_dir but absent from the update are left untouched and are
-    not deleted. The 'updates' staging directory, export output
-    directory, __pycache__, and .git are never used as a source or
-    written to as a destination.
-    Returns the list of destination files that were written.
+    Script/dev-mode only — never used for a frozen exe build.
     """
     applied: list[Path] = []
     for source_path in sorted(source_root.rglob("*")):
@@ -364,23 +396,14 @@ def apply_staged_update(
     current_version: str = APP_VERSION,
 ) -> InstallResult:
     """
-    Apply an already-downloaded staged update in place.
-    Always backs up the current application files first. This is
-    the function to call once a user (or an auto-install setting)
-    has decided a previously staged update should actually replace
-    the running application's files.
+    Apply an already-downloaded staged source update in place.
+    Script/dev-mode only.
     """
     if app_dir is None:
         app_dir = application_dir()
     source_root = find_release_root(staged_dir)
-    backup_dir = backup_application(
-        app_dir,
-        current_version,
-    )
-    applied = apply_extracted_update(
-        source_root,
-        app_dir,
-    )
+    backup_dir = backup_application(app_dir, current_version)
+    applied = apply_extracted_update(source_root, app_dir)
     return InstallResult(
         backup_dir=backup_dir,
         staged_dir=staged_dir,
@@ -393,12 +416,16 @@ def install_update(
     timeout_seconds: int = 60,
 ) -> InstallResult:
     """
-    Download, back up, and apply an update in place in one call.
-    Convenience wrapper combining download_update() and
-    apply_staged_update() for callers (such as the CLI) that want a
-    single-step auto-install rather than a separate stage/apply
-    decision point.
+    Download, back up, and apply a source-file update in one call.
+    Script/dev-mode only. Raises if called with asset_kind == "exe";
+    use stage_exe_update() + apply_exe_update() for that path instead.
     """
+    if info.asset_kind == "exe":
+        raise ValueError(
+            "install_update() applies source-file updates and cannot "
+            "be used for an .exe asset. Use stage_exe_update() and "
+            "apply_exe_update() instead."
+        )
     staged_dir = download_update(
         info,
         dest_dir=dest_dir,
@@ -409,10 +436,171 @@ def install_update(
         app_dir=app_dir,
         current_version=APP_VERSION,
     )
+# ============================================================
+# Frozen exe self-update path (replaces the running .exe file)
+# ============================================================
+def backup_exe(
+    target_exe_path: Path,
+    current_version: str,
+    backup_root: Path | None = None,
+) -> Path:
+    """
+    Copy the current .exe file to a timestamped backup location
+    before it is replaced. Safe to do while the exe is running, since
+    this only reads/copies the file rather than deleting or moving it.
+    """
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    if backup_root is None:
+        backup_root = (
+            target_exe_path.parent / UPDATES_DIRNAME / BACKUPS_DIRNAME
+        )
+    backup_root.mkdir(parents=True, exist_ok=True)
+    backup_path = (
+        backup_root
+        / f"{target_exe_path.stem}_v{version_slug(current_version)}_"
+        f"{stamp}{target_exe_path.suffix}"
+    )
+    shutil.copy2(target_exe_path, backup_path)
+    return backup_path
+def stage_exe_update(
+    info: UpdateInfo,
+    dest_dir: Path | None = None,
+    timeout_seconds: int = 180,
+) -> Path:
+    """
+    Download a compiled .exe release asset and stage it under
+    updates/v<version>/staged_update.exe. Does not touch the running
+    executable in any way — this only downloads and verifies.
+    Verifies the download against the asset's published sha256 digest
+    when GitHub provided one (info.asset_digest), raising ValueError
+    on a mismatch before the file is ever used.
+    """
+    if not info.download_url:
+        raise ValueError("No download URL is available for this release.")
+    if dest_dir is None:
+        dest_dir = (
+            application_dir()
+            / UPDATES_DIRNAME
+            / f"v{version_slug(info.latest_version)}"
+        )
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    request = urllib.request.Request(
+        info.download_url,
+        headers={"User-Agent": APP_NAME.replace(" ", "")},
+    )
+    with urllib.request.urlopen(
+        request,
+        timeout=timeout_seconds,
+    ) as response:
+        data = response.read()
+    if info.asset_digest:
+        verify_digest(data, info.asset_digest)
+    staged_path = dest_dir / STAGED_EXE_FILENAME
+    staged_path.write_bytes(data)
+    return staged_path
+def build_apply_batch_script(
+    new_exe_path: Path,
+    target_exe_path: Path,
+    relaunch: bool = True,
+) -> Path:
+    """
+    Write a small Windows batch script that waits for this process to
+    release its own executable file, replaces it with the staged
+    update, and optionally relaunches it.
+    A running Windows executable's file generally cannot be deleted
+    or overwritten by another process while it is still executing.
+    Rather than attempting the replace from within the still-running
+    process, this script is launched as a separate detached process
+    right before the application exits. It retries the delete/move
+    for up to ~20 seconds, which comfortably covers the short delay
+    between launching this script and the calling process actually
+    exiting and releasing its file handle.
+    """
+    relaunch_flag = "1" if relaunch else "0"
+    script_lines = [
+        "@echo off",
+        "setlocal EnableDelayedExpansion",
+        f'set "NEWEXE={new_exe_path}"',
+        f'set "TARGET={target_exe_path}"',
+        f'set "RELAUNCH={relaunch_flag}"',
+        "set /a attempts=0",
+        ":retry",
+        "set /a attempts+=1",
+        'del /f /q "%TARGET%" 2>nul',
+        'if exist "%TARGET%" (',
+        "    if !attempts! LSS 20 (",
+        "        timeout /t 1 /nobreak >nul",
+        "        goto retry",
+        "    ) else (",
+        "        exit /b 1",
+        "    )",
+        ")",
+        'move /y "%NEWEXE%" "%TARGET%" >nul',
+        'if "%RELAUNCH%"=="1" (',
+        '    start "" "%TARGET%"',
+        ")",
+        'del /f /q "%~f0"',
+        "",
+    ]
+    script_path = new_exe_path.parent / "apply_update.bat"
+    script_path.write_text(
+        "\r\n".join(script_lines),
+        encoding="utf-8",
+    )
+    return script_path
+def launch_apply_script(script_path: Path) -> None:
+    """
+    Launch the apply batch script as a detached background process,
+    so it keeps running after this Python process exits.
+    Windows-only, since the exe self-update flow only applies to
+    Windows PyInstaller builds.
+    """
+    if sys.platform != "win32":
+        raise RuntimeError(
+            "Exe self-update is only supported on Windows."
+        )
+    detached_process = 0x00000008
+    create_new_process_group = 0x00000200
+    subprocess.Popen(
+        ["cmd.exe", "/c", str(script_path)],
+        creationflags=detached_process | create_new_process_group,
+        close_fds=True,
+    )
+def apply_exe_update(
+    staged_exe_path: Path,
+    target_exe_path: Path | None = None,
+    current_version: str = APP_VERSION,
+    relaunch: bool = True,
+) -> Path:
+    """
+    Begin the exe self-update swap.
+    Backs up the current .exe, writes a batch script that waits for
+    this process to release its own file, replaces it with the staged
+    download, and optionally relaunches it, then launches that script
+    as a detached process.
+    The CALLER is responsible for exiting the application (e.g.
+    window.destroy() then sys.exit()) immediately after calling this
+    — the swap can only complete once this process' file handle on
+    its own exe is released, which is why the batch script retries
+    for several seconds rather than acting immediately.
+    Returns the path to the launched batch script.
+    """
+    if target_exe_path is None:
+        if not is_frozen():
+            raise RuntimeError(
+                "apply_exe_update() only applies when running as a "
+                "frozen (PyInstaller) executable."
+            )
+        target_exe_path = Path(sys.executable).resolve()
+    backup_exe(target_exe_path, current_version)
+    script_path = build_apply_batch_script(
+        staged_exe_path.resolve(),
+        target_exe_path,
+        relaunch=relaunch,
+    )
+    launch_apply_script(script_path)
+    return script_path
 def open_releases_page(
     url: str = RELEASES_URL,
 ) -> None:
-    """
-    Open GitHub Releases page.
-    """
     webbrowser.open(url)

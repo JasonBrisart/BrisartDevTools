@@ -8,102 +8,38 @@ from constants import (
     settings_for_profile,
 )
 from core import create_context
-# GUI package import
 from gui.main_gui import run_gui
 from updater import (
+    apply_exe_update,
     apply_staged_update,
     check_for_updates,
     download_update,
     open_releases_page,
+    stage_exe_update,
 )
 from utils import normalize_extension
+import sys
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description=f"{APP_NAME} v{APP_VERSION}"
-    )
-    parser.add_argument(
-        "root",
-        nargs="?",
-        help="Project folder to export. If omitted, GUI mode launches.",
-    )
-    parser.add_argument(
-        "--profile",
-        choices=sorted(VALID_PROFILES),
-        default=DEFAULT_PROFILE,
-    )
-    parser.add_argument(
-        "--output-dir",
-        default=None,
-    )
-    parser.add_argument(
-        "--max-file-bytes",
-        type=int,
-        default=None,
-    )
-    parser.add_argument(
-        "--max-total-bytes",
-        type=int,
-        default=None,
-    )
-    parser.add_argument(
-        "--extensions",
-        default=None,
-    )
-    parser.add_argument(
-        "--exclude-dir",
-        action="append",
-        default=[],
-    )
-    parser.add_argument(
-        "--exclude-file",
-        action="append",
-        default=[],
-    )
-    parser.add_argument(
-        "--no-zip",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--no-redact",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--no-hashes",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--no-line-counts",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--no-tree",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--no-index",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--no-contents",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--no-skipped-details",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--skipped-details-limit",
-        type=int,
-        default=None,
-    )
-    parser.add_argument(
-        "--flat-output",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--check-updates",
-        action="store_true",
-    )
+    parser = argparse.ArgumentParser(description=f"{APP_NAME} v{APP_VERSION}")
+    parser.add_argument("root", nargs="?", help="Project folder to export. If omitted, GUI mode launches.")
+    parser.add_argument("--profile", choices=sorted(VALID_PROFILES), default=DEFAULT_PROFILE)
+    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--max-file-bytes", type=int, default=None)
+    parser.add_argument("--max-total-bytes", type=int, default=None)
+    parser.add_argument("--extensions", default=None)
+    parser.add_argument("--exclude-dir", action="append", default=[])
+    parser.add_argument("--exclude-file", action="append", default=[])
+    parser.add_argument("--no-zip", action="store_true")
+    parser.add_argument("--no-redact", action="store_true")
+    parser.add_argument("--no-hashes", action="store_true")
+    parser.add_argument("--no-line-counts", action="store_true")
+    parser.add_argument("--no-tree", action="store_true")
+    parser.add_argument("--no-index", action="store_true")
+    parser.add_argument("--no-contents", action="store_true")
+    parser.add_argument("--no-skipped-details", action="store_true")
+    parser.add_argument("--skipped-details-limit", type=int, default=None)
+    parser.add_argument("--flat-output", action="store_true")
+    parser.add_argument("--check-updates", action="store_true")
     parser.add_argument(
         "--install-updates",
         action="store_true",
@@ -114,10 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
             "overwritten. Implies --check-updates."
         ),
     )
-    parser.add_argument(
-        "--open-releases",
-        action="store_true",
-    )
+    parser.add_argument("--open-releases", action="store_true")
     return parser
 def settings_from_args(args):
     settings = settings_for_profile(args.profile)
@@ -128,11 +61,7 @@ def settings_from_args(args):
     if args.max_total_bytes is not None:
         settings.max_total_bytes = args.max_total_bytes
     if args.extensions:
-        settings.include_extensions = {
-            normalize_extension(item)
-            for item in args.extensions.split(",")
-            if item.strip()
-        }
+        settings.include_extensions = {normalize_extension(item) for item in args.extensions.split(",") if item.strip()}
     if args.exclude_dir:
         settings.exclude_dirs.update(args.exclude_dir)
     if args.exclude_file:
@@ -154,17 +83,29 @@ def settings_from_args(args):
     if args.no_skipped_details:
         settings.include_skipped_details = False
     if args.skipped_details_limit is not None:
-        settings.skipped_details_limit = max(
-            0,
-            args.skipped_details_limit,
-        )
+        settings.skipped_details_limit = max(0, args.skipped_details_limit)
     if args.flat_output:
         settings.timestamped_export_folder = False
     return settings
-def run_update_check(
-    open_page_when_available: bool = False,
-    install: bool = False,
-) -> None:
+def run_update_check(open_page_when_available: bool = False, install: bool = False) -> None:
+    """
+    Check for, and optionally install, an available update from the
+    command line.
+    An update's asset_kind determines how it must be applied:
+      - "exe": a compiled .exe release asset. This is only ever
+        selected when the current process itself is a frozen
+        PyInstaller executable (see updater.resolve_asset()). It
+        must be applied via stage_exe_update() + apply_exe_update(),
+        which downloads, checksum-verifies, backs up the current
+        exe, and swaps it in place via a detached helper script.
+        download_update()/apply_staged_update() copy .py source
+        files and do nothing useful against a compiled binary, so
+        they must never be used for this asset kind.
+      - "zip": a packaged .zip release asset or GitHub's
+        auto-generated source zipball, applied via the existing
+        download_update() + apply_staged_update() source-overwrite
+        flow.
+    """
     info = check_for_updates()
     print(f"{APP_NAME} v{APP_VERSION}")
     print()
@@ -176,6 +117,19 @@ def run_update_check(
         if open_page_when_available:
             open_releases_page(info.release_url)
         return
+    if info.asset_kind == "exe":
+        print()
+        print(f"Downloading update {info.latest_version} (compiled executable)...")
+        staged_path = stage_exe_update(info)
+        print(f"Staged and checksum-verified at: {staged_path}")
+        print("Backing up current executable and applying update...")
+        apply_exe_update(staged_path, current_version=APP_VERSION)
+        print(
+            "Update applied. This process will now exit so the new "
+            "executable can be swapped into place; it will relaunch "
+            "automatically in a few seconds."
+        )
+        sys.exit(0)
     print()
     print(f"Downloading update {info.latest_version}...")
     staged_dir = download_update(info)
@@ -189,20 +143,14 @@ def run_cli() -> None:
     parser = build_parser()
     args = parser.parse_args()
     if args.check_updates or args.install_updates:
-        run_update_check(
-            open_page_when_available=args.open_releases,
-            install=args.install_updates,
-        )
+        run_update_check(open_page_when_available=args.open_releases, install=args.install_updates)
         if not args.root:
             return
     if not args.root:
         run_gui()
         return
     settings = settings_from_args(args)
-    result = create_context(
-        Path(args.root),
-        settings=settings,
-    )
+    result = create_context(Path(args.root), settings=settings)
     print(f"{APP_NAME} v{APP_VERSION}")
     print()
     print("Build completed")

@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 import tkinter as tk
 from tkinter import ttk
 from constants import (
@@ -20,11 +21,14 @@ from history import (
     recent_entries,
 )
 from updater import (
+    apply_exe_update,
     apply_staged_update,
     application_dir,
     check_for_updates,
     download_update,
+    is_frozen,
     open_releases_page,
+    stage_exe_update,
 )
 def create_about_tab(
     parent: tk.Frame,
@@ -34,8 +38,16 @@ def create_about_tab(
     """
     Create the combined About tab.
     Shows application information, a Recent Exports panel built from
-    local build history, and the update controls (staged download,
-    plus an opt-in toggle to apply staged updates in place).
+    local build history, and the update controls.
+    Two distinct update mechanisms are supported depending on how the
+    application is currently running:
+      - Frozen (PyInstaller .exe build): a compiled .exe release asset
+        is downloaded, its sha256 digest verified, backed up, and
+        swapped in place via a detached helper script, then the app
+        exits so the swap can complete and optionally relaunch.
+      - Script / dev mode: the previous staged source-file update flow
+        (download, stage under updates/, optionally overwrite .py
+        files in place) is used, unchanged from before.
     Returns the startup update function so main_gui.py can run it
     shortly after the window opens.
     """
@@ -158,10 +170,7 @@ def create_about_tab(
     def open_selected_export() -> None:
         selection = history_tree.selection()
         if not selection:
-            show_info(
-                "No Selection",
-                "Select a recent export first.",
-            )
+            show_info("No Selection", "Select a recent export first.")
             return
         entry = entry_lookup.get(selection[0])
         if entry is None:
@@ -196,27 +205,19 @@ def create_about_tab(
         text="Open Selected Export Folder",
         command=open_selected_export,
     )
-    open_export_button.pack(
-        side="left",
-    )
+    open_export_button.pack(side="left")
     refresh_button = tk.Button(
         history_buttons,
         text="Refresh",
         command=refresh_history,
     )
-    refresh_button.pack(
-        side="left",
-        padx=(8, 0),
-    )
+    refresh_button.pack(side="left", padx=(8, 0))
     clear_button = tk.Button(
         history_buttons,
         text="Clear History",
         command=clear_export_history,
     )
-    clear_button.pack(
-        side="left",
-        padx=(8, 0),
-    )
+    clear_button.pack(side="left", padx=(8, 0))
     update_frame = tk.LabelFrame(
         parent,
         text="Updates",
@@ -228,15 +229,14 @@ def create_about_tab(
         padx=16,
         pady=(8, 8),
     )
-    update_status = tk.StringVar(
-        value=(
-            "When 'check on startup' is enabled, updates are checked and "
-            "downloaded automatically. By default, downloaded updates are "
-            "only staged in the 'updates' folder and are not applied. "
-            "Enable 'automatically install' below to have staged updates "
-            "overwrite the running application's own files instead."
-        )
+    mode_note = (
+        "Running as a standalone .exe: updates are downloaded, "
+        "checksum-verified, and swapped in place automatically."
+        if is_frozen()
+        else "Running from source: updates are downloaded and staged "
+        "under 'updates/' for review before being applied."
     )
+    update_status = tk.StringVar(value=mode_note)
     update_label = tk.Label(
         update_frame,
         textvariable=update_status,
@@ -244,37 +244,72 @@ def create_about_tab(
         anchor="w",
         wraplength=720,
     )
-    update_label.pack(
-        fill="x",
-        pady=(0, 10),
-    )
+    update_label.pack(fill="x", pady=(0, 10))
     startup_check = tk.Checkbutton(
         update_frame,
         text="Automatically check for and download updates on startup",
         variable=state.check_updates_startup_var,
     )
-    startup_check.pack(
-        anchor="w",
-    )
+    startup_check.pack(anchor="w")
     auto_install_check = tk.Checkbutton(
         update_frame,
         text=(
             "Automatically install downloaded updates "
-            "(overwrites current files after a backup)"
+            "(overwrites current files/exe after a backup)"
         ),
         variable=state.auto_install_var,
     )
-    auto_install_check.pack(
-        anchor="w",
-        pady=(4, 0),
-    )
-    def perform_auto_update() -> None:
-        update_status.set("Checking for updates...")
+    auto_install_check.pack(anchor="w", pady=(4, 0))
+    def perform_exe_update(info) -> None:
+        update_status.set(
+            f"Update available: {info.latest_version}. Downloading and "
+            "verifying checksum..."
+        )
         window.update_idletasks()
-        info = check_for_updates()
-        if not info.update_available:
-            update_status.set(info.message)
+        try:
+            staged_path = stage_exe_update(info)
+        except Exception as exc:
+            update_status.set(f"Update download failed: {exc}")
+            show_error("Update Download Failed", str(exc))
             return
+        if not state.auto_install_var.get():
+            update_status.set(
+                f"Update {info.latest_version} downloaded and verified. "
+                f"Staged at:\n{staged_path}"
+            )
+            show_info(
+                "Update Downloaded",
+                (
+                    f"Version {info.latest_version} was downloaded and "
+                    f"checksum-verified.\n\nStaged at:\n{staged_path}\n\n"
+                    "Enable 'Automatically install downloaded updates' "
+                    "so future updates are swapped in automatically, or "
+                    "apply this one from the next check."
+                ),
+            )
+            return
+        if not ask_yes_no(
+            "Install Update",
+            (
+                f"Install version {info.latest_version} now?\n\n"
+                "The application will close, the update will be applied, "
+                "and it will relaunch automatically. This usually takes "
+                "a few seconds."
+            ),
+        ):
+            update_status.set(
+                f"Update {info.latest_version} downloaded, not installed."
+            )
+            return
+        try:
+            apply_exe_update(staged_path, current_version=APP_VERSION)
+        except Exception as exc:
+            update_status.set(f"Update install failed: {exc}")
+            show_error("Update Install Failed", str(exc))
+            return
+        window.destroy()
+        sys.exit(0)
+    def perform_script_update(info) -> None:
         update_status.set(
             f"Update available: {info.latest_version}. Downloading..."
         )
@@ -299,9 +334,7 @@ def create_about_tab(
                 ),
             )
             return
-        update_status.set(
-            f"Installing update {info.latest_version}..."
-        )
+        update_status.set(f"Installing update {info.latest_version}...")
         window.update_idletasks()
         try:
             result = apply_staged_update(staged_dir)
@@ -330,6 +363,17 @@ def create_about_tab(
                 "Restart the application to run the new version."
             ),
         )
+    def perform_auto_update() -> None:
+        update_status.set("Checking for updates...")
+        window.update_idletasks()
+        info = check_for_updates()
+        if not info.update_available:
+            update_status.set(info.message)
+            return
+        if info.asset_kind == "exe":
+            perform_exe_update(info)
+        else:
+            perform_script_update(info)
     def startup_update_check() -> None:
         if state.check_updates_startup_var.get():
             perform_auto_update()

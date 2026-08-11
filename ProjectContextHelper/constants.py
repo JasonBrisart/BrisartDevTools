@@ -1,6 +1,6 @@
 from models import ScanSettings
 APP_NAME = "Project Context Helper"
-APP_VERSION = "2.2.1"
+APP_VERSION = "2.3.2"
 AUTHOR = "Jason Brisart"
 REPOSITORY_NAME = "BrisartDevTools"
 REPOSITORY_URL = "https://github.com/JasonBrisart/BrisartDevTools"
@@ -27,6 +27,16 @@ SETTINGS_FILENAME = "PROJECT_CONTEXT_SETTINGS.json"
 # the tool). Read by the About tab. Not part of any export bundle.
 BUILD_HISTORY_FILENAME = "build_history.json"
 MAX_HISTORY_ENTRIES = 50
+# App-level GUI preference toggles (open_after_build,
+# check_updates_startup, auto_install_updates). Separate from
+# per-export PROJECT_CONTEXT_SETTINGS.json, which records the scan
+# settings used for one specific export instead.
+APP_SETTINGS_FILENAME = "app_settings.json"
+# Fixed staging filename for a downloaded .exe update, regardless of
+# the release asset's actual filename (e.g. "ProjectContextHelperv2.2.1.exe").
+# Keeping this name constant means updater.py never has to guess or
+# parse the asset filename back out later in the swap step.
+STAGED_EXE_FILENAME = "staged_update.exe"
 # ============================================================
 # Profiles
 #
@@ -122,6 +132,7 @@ DEFAULT_EXCLUDE_FILES = {
     SNAPSHOT_FILENAME,
     SETTINGS_FILENAME,
     BUILD_HISTORY_FILENAME,
+    APP_SETTINGS_FILENAME,
     ".env",
     ".env.local",
     ".env.development",
