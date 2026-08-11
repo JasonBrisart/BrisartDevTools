@@ -13,8 +13,9 @@ from constants import (
     APP_NAME,
     APP_VERSION,
     EXPORTS_DIRNAME,
+    RELEASE_TAG_PREFIX,
+    RELEASES_LIST_URL,
     RELEASES_URL,
-    UPDATE_CHECK_URL,
 )
 # Downloaded updates are staged here, relative to the application directory.
 # This folder name is already part of DEFAULT_EXCLUDE_DIRS, so staged updates
@@ -107,15 +108,39 @@ def resolve_download_url(payload: dict) -> str:
             if url:
                 return url
     return payload.get("zipball_url") or ""
+def find_latest_release_payload(
+    releases: list[dict],
+    tag_prefix: str,
+) -> dict | None:
+    """
+    Return the first release in a /releases list whose tag matches
+    this tool's tag prefix.
+    BrisartDevTools is a monorepo: the list returned by GitHub is
+    sorted newest-first across ALL tools in the repo, so the first
+    entry overall is not necessarily a Project Context Helper release.
+    This filters to the first entry whose tag_name actually starts
+    with RELEASE_TAG_PREFIX, which is the true "latest" release for
+    this tool specifically.
+    """
+    for release in releases:
+        tag_name = release.get("tag_name") or ""
+        if tag_name.startswith(tag_prefix):
+            return release
+    return None
 def check_for_updates(
     timeout_seconds: int = 6,
 ) -> UpdateInfo:
     """
-    Check GitHub Releases for the newest release.
+    Check GitHub Releases for the newest Project Context Helper
+    release.
+    Fetches the full releases list for the BrisartDevTools monorepo
+    and filters by RELEASE_TAG_PREFIX, rather than using GitHub's
+    /releases/latest endpoint, which returns the newest release for
+    the entire repository regardless of which tool it belongs to.
     """
     try:
         request = urllib.request.Request(
-            UPDATE_CHECK_URL,
+            RELEASES_LIST_URL,
             headers={
                 "User-Agent": APP_NAME.replace(" ", "")
             },
@@ -124,8 +149,23 @@ def check_for_updates(
             request,
             timeout=timeout_seconds,
         ) as response:
-            payload = json.loads(
+            releases = json.loads(
                 response.read().decode("utf-8")
+            )
+        payload = find_latest_release_payload(
+            releases,
+            RELEASE_TAG_PREFIX,
+        )
+        if payload is None:
+            return UpdateInfo(
+                update_available=False,
+                current_version=APP_VERSION,
+                latest_version=APP_VERSION,
+                message=(
+                    "No Project Context Helper release was found "
+                    "in the BrisartDevTools releases list."
+                ),
+                release_url=RELEASES_URL,
             )
         latest_version = (
             payload.get("tag_name")

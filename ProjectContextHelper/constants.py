@@ -1,14 +1,22 @@
 from models import ScanSettings
 APP_NAME = "Project Context Helper"
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.2.1"
 AUTHOR = "Jason Brisart"
 REPOSITORY_NAME = "BrisartDevTools"
 REPOSITORY_URL = "https://github.com/JasonBrisart/BrisartDevTools"
 RELEASES_URL = "https://github.com/JasonBrisart/BrisartDevTools/releases"
-UPDATE_CHECK_URL = (
+# BrisartDevTools is a monorepo containing multiple independently
+# versioned tools (CanonSync, AutoExeBuilder, ReadmeBuilder, etc.).
+# GitHub's /releases/latest endpoint returns the newest release for
+# the WHOLE repository, not the newest Project Context Helper release
+# specifically, so it is never safe to use here on its own.
+# RELEASES_LIST_URL is filtered client-side in updater.py by
+# RELEASE_TAG_PREFIX to find the correct release for this tool.
+RELEASES_LIST_URL = (
     "https://api.github.com/repos/"
-    "JasonBrisart/BrisartDevTools/releases/latest"
+    "JasonBrisart/BrisartDevTools/releases"
 )
+RELEASE_TAG_PREFIX = "project-context-helper-v"
 EXPORTS_DIRNAME = "PROJECT_CONTEXT_EXPORTS"
 CONTEXT_FILENAME = "PROJECT_CONTEXT.md"
 MANIFEST_FILENAME = "PROJECT_MANIFEST.json"
