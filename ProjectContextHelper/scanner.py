@@ -119,23 +119,37 @@ def exclusion_reason(
     Return the reason a path should be excluded.
 
     Returns None when the path is not excluded.
+
+    Directory-name exclusion must only match actual directory
+    components. If `path` itself is a file, its own final path
+    component is a filename, not a directory, so it is excluded from
+    the directory-name check below. Without this distinction, a file
+    that merely shares a name with an excluded directory (e.g. an
+    extensionless build script literally named "build", "dist", or
+    "env" — all default excluded directory names) would be
+    misreported as living inside an excluded directory it was never
+    actually in, and would be silently dropped. This is especially
+    dangerous because `excluded_directory:*` is not a source
+    completeness failure reason, so archive mode would still report
+    a clean PASS while quietly missing a real file.
     """
     try:
         relative_parts = path.relative_to(root).parts
     except ValueError:
         return SKIP_OUTSIDE_ROOT
-
-    for part in relative_parts:
+    directory_parts = (
+        relative_parts
+        if path.is_dir()
+        else relative_parts[:-1]
+    )
+    for part in directory_parts:
         if part in settings.exclude_dirs:
             return f"excluded_directory:{part}"
-
     if path.name in settings.exclude_files:
         return f"excluded_file:{path.name}"
-
     suffix = path.suffix.lower()
     if suffix in settings.exclude_suffixes:
         return f"excluded_suffix:{suffix}"
-
     return None
 
 
@@ -179,42 +193,35 @@ def should_include_file(
     a known reason and the cached FileMeta used for the decision.
     """
     meta = build_file_meta(path, root)
-
     if not path.is_file():
         return False, None, meta
-
     reason = exclusion_reason(path, root, settings)
     if reason:
         return False, skip_record(meta, reason), meta
-
     if not is_configured_source_file(meta, settings):
         return (
             False,
             skip_record(meta, SKIP_EXTENSION_NOT_INCLUDED),
             meta,
         )
-
     if meta.size_bytes is None:
         return (
             False,
             skip_record(meta, SKIP_SIZE_UNAVAILABLE),
             meta,
         )
-
     if meta.size_bytes > settings.max_file_bytes:
         return (
             False,
             skip_record(meta, SKIP_FILE_TOO_LARGE),
             meta,
         )
-
     if settings.include_file_contents and not can_read_text_file(path):
         return (
             False,
             skip_record(meta, SKIP_READ_UNAVAILABLE),
             meta,
         )
-
     return True, None, meta
 
 
@@ -246,7 +253,6 @@ def build_source_failure_message(
         "",
         "Skipped eligible source files:",
     ]
-
     for record in failures:
         size_display = (
             "unknown"
@@ -257,13 +263,11 @@ def build_source_failure_message(
             f"- {record.relative_path} "
             f"({record.reason}, {size_display} bytes)"
         )
-
     lines.append("")
     lines.append(
         "Increase the archive limits, remove the exclusion, "
         "or fix the unreadable file before building a preservation snapshot."
     )
-
     return "\n".join(lines)
 
 
@@ -307,33 +311,27 @@ def collect_included_files(
     included_records: list[FileRecord] = []
     skipped_records: list[SkipRecord] = []
     total_bytes = 0
-
     for path in sorted(root.rglob("*")):
         include, skip, meta = should_include_file(
             path,
             root,
             settings,
         )
-
         if skip is not None:
             skipped_records.append(skip)
             continue
-
         if not include:
             continue
-
         if meta.size_bytes is None:
             skipped_records.append(
                 skip_record(meta, SKIP_SIZE_UNAVAILABLE)
             )
             continue
-
         if total_bytes + meta.size_bytes > settings.max_total_bytes:
             skipped_records.append(
                 skip_record(meta, SKIP_TOTAL_SIZE_LIMIT)
             )
             continue
-
         included_paths.append(path)
         included_records.append(
             build_file_record(
@@ -342,14 +340,11 @@ def collect_included_files(
             )
         )
         total_bytes += meta.size_bytes
-
     failures = source_completeness_failures(skipped_records)
-
     if settings.require_complete_source and failures:
         raise ValueError(
             build_source_failure_message(failures)
         )
-
     return ScanResult(
         included_paths=tuple(included_paths),
         included_records=tuple(included_records),
@@ -393,7 +388,6 @@ def build_tree(
             )
         except OSError:
             return
-
         for index, entry in enumerate(entries):
             is_last = index == len(entries) - 1
             connector = (
@@ -411,7 +405,6 @@ def build_tree(
                     else ""
                 )
             )
-
             if entry.is_dir():
                 extension = (
                     "    "

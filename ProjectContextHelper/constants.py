@@ -1,10 +1,12 @@
 from models import ScanSettings
+
 APP_NAME = "Project Context Helper"
-APP_VERSION = "2.3.2"
+APP_VERSION = "2.3.3"
 AUTHOR = "Jason Brisart"
 REPOSITORY_NAME = "BrisartDevTools"
 REPOSITORY_URL = "https://github.com/JasonBrisart/BrisartDevTools"
 RELEASES_URL = "https://github.com/JasonBrisart/BrisartDevTools/releases"
+
 # BrisartDevTools is a monorepo containing multiple independently
 # versioned tools (CanonSync, AutoExeBuilder, ReadmeBuilder, etc.).
 # GitHub's /releases/latest endpoint returns the newest release for
@@ -17,26 +19,31 @@ RELEASES_LIST_URL = (
     "JasonBrisart/BrisartDevTools/releases"
 )
 RELEASE_TAG_PREFIX = "project-context-helper-v"
+
 EXPORTS_DIRNAME = "PROJECT_CONTEXT_EXPORTS"
 CONTEXT_FILENAME = "PROJECT_CONTEXT.md"
 MANIFEST_FILENAME = "PROJECT_MANIFEST.json"
 SUMMARY_FILENAME = "PROJECT_SUMMARY.txt"
 SNAPSHOT_FILENAME = "PROJECT_SNAPSHOT.zip"
 SETTINGS_FILENAME = "PROJECT_CONTEXT_SETTINGS.json"
+
 # Local build history (recent exports across every project run through
 # the tool). Read by the About tab. Not part of any export bundle.
 BUILD_HISTORY_FILENAME = "build_history.json"
 MAX_HISTORY_ENTRIES = 50
+
 # App-level GUI preference toggles (open_after_build,
 # check_updates_startup, auto_install_updates). Separate from
 # per-export PROJECT_CONTEXT_SETTINGS.json, which records the scan
 # settings used for one specific export instead.
 APP_SETTINGS_FILENAME = "app_settings.json"
+
 # Fixed staging filename for a downloaded .exe update, regardless of
 # the release asset's actual filename (e.g. "ProjectContextHelperv2.2.1.exe").
 # Keeping this name constant means updater.py never has to guess or
 # parse the asset filename back out later in the swap step.
 STAGED_EXE_FILENAME = "staged_update.exe"
+
 # ============================================================
 # Profiles
 #
@@ -55,6 +62,7 @@ VALID_PROFILES = {
     PROFILE_STANDARD,
     PROFILE_ARCHIVE,
 }
+
 DEFAULT_EXTENSIONS = {
     ".py",
     ".json",
@@ -80,6 +88,7 @@ DEFAULT_EXTENSIONS = {
     ".gitignore",
     ".dockerignore",
 }
+
 # Archive folds in the extra documentation/config extensions that
 # used to live in the expanded profile, plus the broad source-code
 # extension set for maximum preservation.
@@ -109,6 +118,7 @@ ARCHIVE_EXTENSIONS = DEFAULT_EXTENSIONS | {
     ".pl",
     ".lua",
 }
+
 DEFAULT_EXCLUDE_DIRS = {
     ".git",
     ".venv",
@@ -125,6 +135,7 @@ DEFAULT_EXCLUDE_DIRS = {
     "updates",
     EXPORTS_DIRNAME,
 }
+
 DEFAULT_EXCLUDE_FILES = {
     CONTEXT_FILENAME,
     MANIFEST_FILENAME,
@@ -139,6 +150,7 @@ DEFAULT_EXCLUDE_FILES = {
     ".env.production",
     ".env.test",
 }
+
 DEFAULT_EXCLUDE_SUFFIXES = {
     ".pem",
     ".key",
@@ -162,12 +174,15 @@ DEFAULT_EXCLUDE_SUFFIXES = {
     ".7z",
     ".rar",
 }
+
 DEFAULT_MAX_FILE_BYTES = 350_000
 DEFAULT_MAX_TOTAL_BYTES = 5_000_000
 ARCHIVE_MAX_FILE_BYTES = 2_000_000
 ARCHIVE_MAX_TOTAL_BYTES = 100_000_000
 STANDARD_SKIPPED_DETAILS_LIMIT = 100
 ARCHIVE_SKIPPED_DETAILS_LIMIT = 1000
+
+
 def apply_common_defaults(settings: ScanSettings) -> ScanSettings:
     """
     Apply shared default exclusion rules.
@@ -176,9 +191,12 @@ def apply_common_defaults(settings: ScanSettings) -> ScanSettings:
     settings.exclude_files = set(DEFAULT_EXCLUDE_FILES)
     settings.exclude_suffixes = set(DEFAULT_EXCLUDE_SUFFIXES)
     return settings
+
+
 def apply_standard_preset(settings: ScanSettings) -> ScanSettings:
     """
     Standard profile.
+
     Fast everyday export.
     Best for quick documentation, project overview,
     and lightweight AI context.
@@ -198,9 +216,12 @@ def apply_standard_preset(settings: ScanSettings) -> ScanSettings:
     settings.skipped_details_limit = STANDARD_SKIPPED_DETAILS_LIMIT
     settings.require_complete_source = False
     return settings
+
+
 def apply_archive_preset(settings: ScanSettings) -> ScanSettings:
     """
     Archive profile. Default profile.
+
     Maximum preservation mode.
     This mode requires complete source capture.
     If an eligible source file cannot be included,
@@ -221,9 +242,12 @@ def apply_archive_preset(settings: ScanSettings) -> ScanSettings:
     settings.skipped_details_limit = ARCHIVE_SKIPPED_DETAILS_LIMIT
     settings.require_complete_source = True
     return settings
+
+
 def settings_for_profile(profile: str) -> ScanSettings:
     """
     Build ScanSettings from a profile name.
+
     Profiles:
     - standard
     - archive (default)
