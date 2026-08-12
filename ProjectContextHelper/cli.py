@@ -1,5 +1,6 @@
 from pathlib import Path
 import argparse
+
 from constants import (
     APP_NAME,
     APP_VERSION,
@@ -19,6 +20,8 @@ from updater import (
 )
 from utils import normalize_extension
 import sys
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=f"{APP_NAME} v{APP_VERSION}")
     parser.add_argument("root", nargs="?", help="Project folder to export. If omitted, GUI mode launches.")
@@ -52,6 +55,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--open-releases", action="store_true")
     return parser
+
+
 def settings_from_args(args):
     settings = settings_for_profile(args.profile)
     if args.output_dir:
@@ -87,10 +92,13 @@ def settings_from_args(args):
     if args.flat_output:
         settings.timestamped_export_folder = False
     return settings
+
+
 def run_update_check(open_page_when_available: bool = False, install: bool = False) -> None:
     """
     Check for, and optionally install, an available update from the
     command line.
+
     An update's asset_kind determines how it must be applied:
       - "exe": a compiled .exe release asset. This is only ever
         selected when the current process itself is a frozen
@@ -101,10 +109,16 @@ def run_update_check(open_page_when_available: bool = False, install: bool = Fal
         download_update()/apply_staged_update() copy .py source
         files and do nothing useful against a compiled binary, so
         they must never be used for this asset kind.
-      - "zip": a packaged .zip release asset or GitHub's
-        auto-generated source zipball, applied via the existing
-        download_update() + apply_staged_update() source-overwrite
-        flow.
+      - "zip": a packaged .zip release asset, applied via the
+        existing download_update() + apply_staged_update()
+        source-overwrite flow.
+      - "none": a newer release exists on GitHub, but no asset
+        compatible with the current run mode was attached to it
+        (e.g. only a .exe asset exists while running from source, or
+        vice versa). Nothing is downloaded in this case — this never
+        falls back to GitHub's auto-generated source zipball, which
+        would pull down the entire BrisartDevTools monorepo instead
+        of just this tool.
     """
     info = check_for_updates()
     print(f"{APP_NAME} v{APP_VERSION}")
@@ -113,6 +127,8 @@ def run_update_check(open_page_when_available: bool = False, install: bool = Fal
     if not info.update_available:
         return
     print(f"Release page: {info.release_url}")
+    if info.asset_kind == "none":
+        return
     if not install:
         if open_page_when_available:
             open_releases_page(info.release_url)
@@ -139,6 +155,8 @@ def run_update_check(open_page_when_available: bool = False, install: bool = Fal
     print(f"Backup written to: {result.backup_dir}")
     print(f"Files updated: {len(result.applied_files)}")
     print("Restart the application to run the new version.")
+
+
 def run_cli() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -166,7 +184,11 @@ def run_cli() -> None:
     print(f"Included Files: {result.included_count}")
     print(f"Skipped Files : {result.skipped_count}")
     print(f"Included Bytes: {result.total_included_bytes}")
+
+
 def main() -> None:
     run_cli()
+
+
 if __name__ == "__main__":
     main()

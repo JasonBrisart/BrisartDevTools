@@ -2,6 +2,7 @@ from pathlib import Path
 import sys
 import tkinter as tk
 from tkinter import ttk
+
 from constants import (
     APP_NAME,
     APP_VERSION,
@@ -30,6 +31,8 @@ from updater import (
     open_releases_page,
     stage_exe_update,
 )
+
+
 def create_about_tab(
     parent: tk.Frame,
     window: tk.Tk,
@@ -37,8 +40,10 @@ def create_about_tab(
 ):
     """
     Create the combined About tab.
+
     Shows application information, a Recent Exports panel built from
     local build history, and the update controls.
+
     Two distinct update mechanisms are supported depending on how the
     application is currently running:
       - Frozen (PyInstaller .exe build): a compiled .exe release asset
@@ -48,6 +53,14 @@ def create_about_tab(
       - Script / dev mode: the previous staged source-file update flow
         (download, stage under updates/, optionally overwrite .py
         files in place) is used, unchanged from before.
+
+    An update check can also report asset_kind == "none": a newer
+    release exists on GitHub, but no asset compatible with the
+    current run mode was attached to it. In that case the user is
+    informed but nothing is downloaded — this never falls back to
+    GitHub's auto-generated source zipball, which would pull in the
+    entire BrisartDevTools monorepo instead of just this tool.
+
     Returns the startup update function so main_gui.py can run it
     shortly after the window opens.
     """
@@ -70,6 +83,7 @@ def create_about_tab(
         padx=18,
         pady=(18, 8),
     )
+
     releases_button = tk.Button(
         parent,
         text="Open Releases Page",
@@ -80,6 +94,7 @@ def create_about_tab(
         padx=18,
         pady=(0, 8),
     )
+
     history_frame = tk.LabelFrame(
         parent,
         text="Recent Exports",
@@ -92,16 +107,19 @@ def create_about_tab(
         padx=16,
         pady=(8, 8),
     )
+
     tree_container = tk.Frame(history_frame)
     tree_container.pack(
         fill="both",
         expand=True,
     )
+
     history_scrollbar = tk.Scrollbar(tree_container)
     history_scrollbar.pack(
         side="right",
         fill="y",
     )
+
     columns = (
         "created",
         "profile",
@@ -132,7 +150,9 @@ def create_about_tab(
         expand=True,
     )
     history_scrollbar.config(command=history_tree.yview)
+
     entry_lookup: dict[str, HistoryEntry] = {}
+
     def refresh_history() -> None:
         history_tree.delete(*history_tree.get_children())
         entry_lookup.clear()
@@ -166,7 +186,9 @@ def create_about_tab(
                 ),
             )
             entry_lookup[item_id] = entry
+
     refresh_history()
+
     def open_selected_export() -> None:
         selection = history_tree.selection()
         if not selection:
@@ -183,6 +205,7 @@ def create_about_tab(
             )
             return
         open_folder(export_dir)
+
     def clear_export_history() -> None:
         if not ask_yes_no(
             "Clear History",
@@ -195,6 +218,7 @@ def create_about_tab(
             return
         clear_history(app_dir=application_dir())
         refresh_history()
+
     history_buttons = tk.Frame(history_frame)
     history_buttons.pack(
         fill="x",
@@ -218,6 +242,7 @@ def create_about_tab(
         command=clear_export_history,
     )
     clear_button.pack(side="left", padx=(8, 0))
+
     update_frame = tk.LabelFrame(
         parent,
         text="Updates",
@@ -229,6 +254,7 @@ def create_about_tab(
         padx=16,
         pady=(8, 8),
     )
+
     mode_note = (
         "Running as a standalone .exe: updates are downloaded, "
         "checksum-verified, and swapped in place automatically."
@@ -245,12 +271,14 @@ def create_about_tab(
         wraplength=720,
     )
     update_label.pack(fill="x", pady=(0, 10))
+
     startup_check = tk.Checkbutton(
         update_frame,
         text="Automatically check for and download updates on startup",
         variable=state.check_updates_startup_var,
     )
     startup_check.pack(anchor="w")
+
     auto_install_check = tk.Checkbutton(
         update_frame,
         text=(
@@ -260,6 +288,7 @@ def create_about_tab(
         variable=state.auto_install_var,
     )
     auto_install_check.pack(anchor="w", pady=(4, 0))
+
     def perform_exe_update(info) -> None:
         update_status.set(
             f"Update available: {info.latest_version}. Downloading and "
@@ -309,6 +338,7 @@ def create_about_tab(
             return
         window.destroy()
         sys.exit(0)
+
     def perform_script_update(info) -> None:
         update_status.set(
             f"Update available: {info.latest_version}. Downloading..."
@@ -363,6 +393,7 @@ def create_about_tab(
                 "Restart the application to run the new version."
             ),
         )
+
     def perform_auto_update() -> None:
         update_status.set("Checking for updates...")
         window.update_idletasks()
@@ -370,11 +401,17 @@ def create_about_tab(
         if not info.update_available:
             update_status.set(info.message)
             return
+        if info.asset_kind == "none":
+            update_status.set(info.message)
+            show_info("Update Available", info.message)
+            return
         if info.asset_kind == "exe":
             perform_exe_update(info)
         else:
             perform_script_update(info)
+
     def startup_update_check() -> None:
         if state.check_updates_startup_var.get():
             perform_auto_update()
+
     return startup_update_check
