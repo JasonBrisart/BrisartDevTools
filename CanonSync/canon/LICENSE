@@ -35,7 +35,7 @@ the definitive terms before publishing this file.
 #       licensing model, or
 #   (b) defaulting to a standard OSI license (MIT/Apache-2.0/GPL/etc.) that
 #       may not match the subscription / official-use / governed-participation
-#       structure your BrisartLicensing model is actually built around.
+#       structure a project is actually built around.
 #
 # Either of those risks silently shipping incorrect legal terms across every
 # repo CanonSync touches in whole mode. So this stays a placeholder here.
