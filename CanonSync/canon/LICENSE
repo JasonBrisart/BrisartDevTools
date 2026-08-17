@@ -20,3 +20,23 @@ it on. Before enabling it:
 Authoritative licensing terms and governance for this ecosystem are
 maintained separately. Refer to your governance/licensing repository for
 the definitive terms before publishing this file.
+
+# ==========================================================================
+# Notes on why this file is NOT expanded like gitignore/gitattributes/
+# editorconfig masters
+# --------------------------------------------------------------------------
+# Those three are technical config templates: adding more community-standard
+# patterns is objectively safe, since an unused rule for an OS/editor/
+# language you don't touch is simply inert.
+#
+# A LICENSE is a legally operative document. There is no generic "more
+# complete" version to expand this into without either:
+#   (a) fabricating legal terms that don't reflect your actual ecosystem's
+#       licensing model, or
+#   (b) defaulting to a standard OSI license (MIT/Apache-2.0/GPL/etc.) that
+#       may not match the subscription / official-use / governed-participation
+#       structure your BrisartLicensing model is actually built around.
+#
+# Either of those risks silently shipping incorrect legal terms across every
+# repo CanonSync touches in whole mode. So this stays a placeholder here.
+# ==========================================================================
