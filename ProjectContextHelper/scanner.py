@@ -36,7 +36,6 @@ class FileMeta:
 
     This reduces repeated stat calls during scan decisions.
     """
-
     path: Path
     relative_path: str
     size_bytes: int | None
@@ -160,10 +159,39 @@ def is_configured_source_file(
     """
     Return True when a file matches the configured source/text
     extension list for the active profile.
+
+    Most entries in the extension list are simple, single-dot
+    suffixes (".py", ".md", ...), which pathlib's `Path.suffix`
+    captures correctly on its own. A few profile extensions are
+    intentionally compound / multi-segment (".env.example" is the
+    one shipped by default), meant to catch files like
+    "backend/api.env.example" or "config.env.example" — but
+    `Path.suffix` only ever returns the LAST dot-segment of a name,
+    so for "config.env.example" it returns ".example", not
+    ".env.example". Neither that nor an exact `name_lower` match
+    (which only ever matches a file literally named ".env.example"
+    with nothing before it) recognized this common pattern, so any
+    such file was silently skipped with
+    "extension_not_included" — a reason that is intentionally not
+    part of `SOURCE_COMPLETENESS_FAILURE_REASONS`, so archive mode
+    still reported a clean PASS while quietly missing the file.
+
+    The final check below matches a file whose name ends with any
+    compound (multi-dot) extension in the configured set, regardless
+    of what precedes it, which correctly captures both
+    ".env.example" itself and named variants like
+    "config.env.example". Simple single-dot extensions are left to
+    the existing suffix/name_lower checks, so behavior for the
+    overwhelming majority of extensions is unchanged.
     """
-    return (
-        meta.suffix in settings.include_extensions
-        or meta.name_lower in settings.include_extensions
+    if meta.suffix in settings.include_extensions:
+        return True
+    if meta.name_lower in settings.include_extensions:
+        return True
+    return any(
+        meta.name_lower.endswith(extension)
+        for extension in settings.include_extensions
+        if extension.count(".") > 1
     )
 
 
