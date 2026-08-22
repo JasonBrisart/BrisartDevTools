@@ -1,16 +1,23 @@
 from pathlib import Path
 import argparse
+import sys
 
-from constants import (
+from core.constants import (
     APP_NAME,
     APP_VERSION,
     DEFAULT_PROFILE,
     VALID_PROFILES,
     settings_for_profile,
 )
-from core import create_context
+from core.builder import create_context
+from core.utils import normalize_extension
 from gui.main_gui import run_gui
-from updater import (
+from services import profile_manager
+from services.settings_memory import (
+    load_last_settings,
+    save_last_settings,
+)
+from services.updater import (
     apply_exe_update,
     apply_staged_update,
     check_for_updates,
@@ -18,11 +25,23 @@ from updater import (
     open_releases_page,
     stage_exe_update,
 )
-from utils import normalize_extension
-import sys
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """
+    The previous version of this tool (v2.3.5) had these flags:
+    root, --profile, --output-dir, --max-file-bytes, --max-total-bytes,
+    --extensions, --exclude-dir, --exclude-file, --no-zip, --no-redact,
+    --no-hashes, --no-line-counts, --no-tree, --no-index, --no-contents,
+    --no-skipped-details, --skipped-details-limit, --flat-output,
+    --check-updates, --install-updates, --open-releases.
+    Every flag below through --git-state-commit-limit is new in this
+    release (Git State detection); --use-last-settings and
+    --remember-settings are new (always-on settings memory, GUI-only,
+    with matching explicit opt-in CLI flags); --load-profile,
+    --save-profile, --delete-profile, and --list-profiles are new
+    (Custom Profiles).
+    """
     parser = argparse.ArgumentParser(description=f"{APP_NAME} v{APP_VERSION}")
     parser.add_argument("root", nargs="?", help="Project folder to export. If omitted, GUI mode launches.")
     parser.add_argument("--profile", choices=sorted(VALID_PROFILES), default=DEFAULT_PROFILE)
@@ -41,24 +60,34 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-contents", action="store_true")
     parser.add_argument("--no-skipped-details", action="store_true")
     parser.add_argument("--skipped-details-limit", type=int, default=None)
+    parser.add_argument("--git-state", action="store_true")
+    parser.add_argument("--no-git-state", action="store_true")
+    parser.add_argument("--git-state-commit-limit", type=int, default=None)
+    parser.add_argument("--use-last-settings", action="store_true")
+    parser.add_argument("--remember-settings", action="store_true")
+    parser.add_argument("--load-profile", metavar="NAME", default=None)
+    parser.add_argument("--save-profile", metavar="NAME", default=None)
+    parser.add_argument("--delete-profile", metavar="NAME", default=None)
+    parser.add_argument("--list-profiles", action="store_true")
     parser.add_argument("--flat-output", action="store_true")
     parser.add_argument("--check-updates", action="store_true")
-    parser.add_argument(
-        "--install-updates",
-        action="store_true",
-        help=(
-            "If a newer release is found, download it and apply it over "
-            "the current application files. A backup of the current "
-            "files is written under updates/backups/ before anything is "
-            "overwritten. Implies --check-updates."
-        ),
-    )
+    parser.add_argument("--install-updates", action="store_true")
     parser.add_argument("--open-releases", action="store_true")
     return parser
 
 
 def settings_from_args(args):
     settings = settings_for_profile(args.profile)
+    if args.use_last_settings:
+        remembered = load_last_settings()
+        if remembered is not None:
+            settings = remembered
+    if args.load_profile:
+        loaded = profile_manager.load_profile(args.load_profile)
+        if loaded is not None:
+            settings = loaded
+        else:
+            print(f"Warning: custom profile '{args.load_profile}' was not found; continuing with the settings that would otherwise apply.")
     if args.output_dir:
         settings.output_dir_name = args.output_dir
     if args.max_file_bytes is not None:
@@ -66,7 +95,7 @@ def settings_from_args(args):
     if args.max_total_bytes is not None:
         settings.max_total_bytes = args.max_total_bytes
     if args.extensions:
-        settings.include_extensions = {normalize_extension(item) for item in args.extensions.split(",") if item.strip()}
+        settings.include_extensions = {normalize_extension(i) for i in args.extensions.split(",") if i.strip()}
     if args.exclude_dir:
         settings.exclude_dirs.update(args.exclude_dir)
     if args.exclude_file:
@@ -89,37 +118,18 @@ def settings_from_args(args):
         settings.include_skipped_details = False
     if args.skipped_details_limit is not None:
         settings.skipped_details_limit = max(0, args.skipped_details_limit)
+    if args.git_state:
+        settings.include_git_state = True
+    if args.no_git_state:
+        settings.include_git_state = False
+    if args.git_state_commit_limit is not None:
+        settings.git_state_commit_limit = max(0, args.git_state_commit_limit)
     if args.flat_output:
         settings.timestamped_export_folder = False
     return settings
 
 
 def run_update_check(open_page_when_available: bool = False, install: bool = False) -> None:
-    """
-    Check for, and optionally install, an available update from the
-    command line.
-
-    An update's asset_kind determines how it must be applied:
-      - "exe": a compiled .exe release asset. This is only ever
-        selected when the current process itself is a frozen
-        PyInstaller executable (see updater.resolve_asset()). It
-        must be applied via stage_exe_update() + apply_exe_update(),
-        which downloads, checksum-verifies, backs up the current
-        exe, and swaps it in place via a detached helper script.
-        download_update()/apply_staged_update() copy .py source
-        files and do nothing useful against a compiled binary, so
-        they must never be used for this asset kind.
-      - "zip": a packaged .zip release asset, applied via the
-        existing download_update() + apply_staged_update()
-        source-overwrite flow.
-      - "none": a newer release exists on GitHub, but no asset
-        compatible with the current run mode was attached to it
-        (e.g. only a .exe asset exists while running from source, or
-        vice versa). Nothing is downloaded in this case — this never
-        falls back to GitHub's auto-generated source zipball, which
-        would pull down the entire BrisartDevTools monorepo instead
-        of just this tool.
-    """
     info = check_for_updates()
     print(f"{APP_NAME} v{APP_VERSION}")
     print()
@@ -140,11 +150,7 @@ def run_update_check(open_page_when_available: bool = False, install: bool = Fal
         print(f"Staged and checksum-verified at: {staged_path}")
         print("Backing up current executable and applying update...")
         apply_exe_update(staged_path, current_version=APP_VERSION)
-        print(
-            "Update applied. This process will now exit so the new "
-            "executable can be swapped into place; it will relaunch "
-            "automatically in a few seconds."
-        )
+        print("Update applied. This process will now exit so the new executable can be swapped into place; it will relaunch automatically in a few seconds.")
         sys.exit(0)
     print()
     print(f"Downloading update {info.latest_version}...")
@@ -157,18 +163,64 @@ def run_update_check(open_page_when_available: bool = False, install: bool = Fal
     print("Restart the application to run the new version.")
 
 
+def run_profile_list() -> None:
+    names = profile_manager.list_profiles()
+    print(f"{APP_NAME} v{APP_VERSION}")
+    print()
+    if names:
+        print("Custom profiles:")
+        for name in names:
+            print(f"  - {name}")
+    else:
+        print("No custom profiles saved yet.")
+
+
+def run_profile_delete(name: str) -> None:
+    deleted = profile_manager.delete_profile(name)
+    print(f"{APP_NAME} v{APP_VERSION}")
+    print()
+    if deleted:
+        print(f"Deleted custom profile '{name}'.")
+    else:
+        print(f"No custom profile named '{name}' was found.")
+
+
 def run_cli() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.list_profiles:
+        run_profile_list()
+        if not args.root:
+            return
+
+    if args.delete_profile:
+        run_profile_delete(args.delete_profile)
+        if not args.root:
+            return
+
     if args.check_updates or args.install_updates:
         run_update_check(open_page_when_available=args.open_releases, install=args.install_updates)
         if not args.root:
             return
+
     if not args.root:
         run_gui()
         return
+
     settings = settings_from_args(args)
     result = create_context(Path(args.root), settings=settings)
+
+    if args.remember_settings:
+        save_last_settings(settings)
+
+    if args.save_profile:
+        try:
+            profile_manager.save_profile(args.save_profile, settings)
+            print(f"Saved custom profile '{args.save_profile}'.")
+        except ValueError as exc:
+            print(f"Could not save custom profile: {exc}")
+
     print(f"{APP_NAME} v{APP_VERSION}")
     print()
     print("Build completed")
@@ -180,6 +232,9 @@ def run_cli() -> None:
     print(f"Settings File: {result.settings_path}")
     if result.snapshot_path:
         print(f"Snapshot Zip : {result.snapshot_path}")
+    if result.git_branch or result.git_commit_short:
+        dirty_display = "unverified" if result.git_is_dirty is None else ("dirty" if result.git_is_dirty else "clean")
+        print(f"Git State    : {result.git_branch or '(detached HEAD)'} @ {result.git_commit_short or 'unknown'} ({dirty_display})")
     print()
     print(f"Included Files: {result.included_count}")
     print(f"Skipped Files : {result.skipped_count}")

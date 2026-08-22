@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from dataclasses import (
     asdict,
     dataclass,
@@ -8,29 +7,27 @@ from dataclasses import (
 from pathlib import Path
 from typing import Any
 
+_SETTINGS_SET_FIELDS = (
+    "include_extensions",
+    "exclude_dirs",
+    "exclude_files",
+    "exclude_suffixes",
+)
+
 
 @dataclass(slots=True)
 class ScanSettings:
     """
     User-adjustable settings for a build run.
-
-    require_complete_source:
-        When True, the scanner treats missing eligible source files
-        as a hard failure. This is intended for archive/preservation
-        mode where every eligible source file must be captured.
     """
-
     profile: str = "standard"
     output_dir_name: str = "PROJECT_CONTEXT_EXPORTS"
-
     include_extensions: set[str] = field(default_factory=set)
     exclude_dirs: set[str] = field(default_factory=set)
     exclude_files: set[str] = field(default_factory=set)
     exclude_suffixes: set[str] = field(default_factory=set)
-
     max_file_bytes: int = 350_000
     max_total_bytes: int = 5_000_000
-
     include_snapshot_zip: bool = True
     redact_sensitive_lines: bool = True
     include_hashes: bool = True
@@ -40,33 +37,32 @@ class ScanSettings:
     include_file_contents: bool = True
     include_skipped_details: bool = True
     timestamped_export_folder: bool = True
-
     skipped_details_limit: int = 250
     require_complete_source: bool = False
+    include_git_state: bool = False
+    git_state_commit_limit: int = 5
 
     def to_jsonable(self) -> dict[str, Any]:
-        """
-        Convert to JSON-safe dictionary.
-        """
         data = asdict(self)
-
-        for key in (
-            "include_extensions",
-            "exclude_dirs",
-            "exclude_files",
-            "exclude_suffixes",
-        ):
+        for key in _SETTINGS_SET_FIELDS:
             data[key] = sorted(list(data[key]))
-
         return data
+
+    @classmethod
+    def from_jsonable(cls, data: dict[str, Any]) -> "ScanSettings":
+        data = dict(data)
+        for field_name in _SETTINGS_SET_FIELDS:
+            if field_name in data:
+                data[field_name] = set(data[field_name])
+        valid_fields = {
+            field_obj.name for field_obj in cls.__dataclass_fields__.values()
+        }
+        filtered = {key: value for key, value in data.items() if key in valid_fields}
+        return cls(**filtered)
 
 
 @dataclass(frozen=True, slots=True)
 class FileRecord:
-    """
-    Metadata for an included file.
-    """
-
     relative_path: str
     size_bytes: int
     extension: str
@@ -76,10 +72,6 @@ class FileRecord:
 
 @dataclass(frozen=True, slots=True)
 class SkipRecord:
-    """
-    Metadata describing why a file was skipped.
-    """
-
     relative_path: str
     reason: str
     size_bytes: int | None = None
@@ -87,13 +79,6 @@ class SkipRecord:
 
 @dataclass(frozen=True, slots=True)
 class ScanResult:
-    """
-    Scanner output.
-
-    Tuples are used to prevent accidental replacement or mutation
-    of result collections after a scan completes.
-    """
-
     included_paths: tuple[Path, ...]
     included_records: tuple[FileRecord, ...]
     skipped_records: tuple[SkipRecord, ...]
@@ -102,17 +87,15 @@ class ScanResult:
 
 @dataclass(frozen=True, slots=True)
 class BuildResult:
-    """
-    Final export result.
-    """
-
     export_dir: Path
     context_path: Path
     manifest_path: Path
     summary_path: Path
     settings_path: Path
     snapshot_path: Path | None
-
     included_count: int
     skipped_count: int
     total_included_bytes: int
+    git_branch: str | None = None
+    git_commit_short: str | None = None
+    git_is_dirty: bool | None = None

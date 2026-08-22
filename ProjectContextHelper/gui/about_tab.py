@@ -3,7 +3,7 @@ import sys
 import tkinter as tk
 from tkinter import ttk
 
-from constants import (
+from core.constants import (
     APP_NAME,
     APP_VERSION,
     AUTHOR,
@@ -16,12 +16,12 @@ from gui.dialogs import (
     show_error,
     show_info,
 )
-from history import (
+from services.history import (
     HistoryEntry,
     clear_history,
     recent_entries,
 )
-from updater import (
+from services.updater import (
     apply_exe_update,
     apply_staged_update,
     application_dir,
@@ -33,160 +33,66 @@ from updater import (
 )
 
 
-def create_about_tab(
-    parent: tk.Frame,
-    window: tk.Tk,
-    state: GuiState,
-):
+def create_about_tab(parent: tk.Frame, window: tk.Tk, state: GuiState):
     """
-    Create the combined About tab.
-
-    Shows application information, a Recent Exports panel built from
-    local build history, and the update controls.
-
-    Two distinct update mechanisms are supported depending on how the
-    application is currently running:
-      - Frozen (PyInstaller .exe build): a compiled .exe release asset
-        is downloaded, its sha256 digest verified, backed up, and
-        swapped in place via a detached helper script, then the app
-        exits so the swap can complete and optionally relaunch.
-      - Script / dev mode: the previous staged source-file update flow
-        (download, stage under updates/, optionally overwrite .py
-        files in place) is used, unchanged from before.
-
-    An update check can also report asset_kind == "none": a newer
-    release exists on GitHub, but no asset compatible with the
-    current run mode was attached to it. In that case the user is
-    informed but nothing is downloaded — this never falls back to
-    GitHub's auto-generated source zipball, which would pull in the
-    entire BrisartDevTools monorepo instead of just this tool.
-
-    Returns the startup update function so main_gui.py can run it
-    shortly after the window opens.
+    The previous version's history_tree had columns ("created",
+    "profile", "included", "skipped", "root") -- 5 columns, no "git"
+    column. This version adds a "git" column between "skipped" and
+    "root".
     """
     about_text = tk.Label(
-        parent,
-        justify="left",
-        anchor="nw",
-        wraplength=760,
+        parent, justify="left", anchor="nw", wraplength=760,
         text=(
             f"{APP_NAME} v{APP_VERSION}\n\n"
             "A no-dependency utility that packages a project folder into a "
             "readable Markdown context file, JSON manifest, summary file, "
             "settings record, and optional ZIP snapshot.\n\n"
-            f"Author: {AUTHOR}\n"
-            f"Repository: {REPOSITORY_URL}"
+            f"Author: {AUTHOR}\nRepository: {REPOSITORY_URL}"
         ),
     )
-    about_text.pack(
-        fill="x",
-        padx=18,
-        pady=(18, 8),
-    )
-
-    releases_button = tk.Button(
-        parent,
-        text="Open Releases Page",
-        command=lambda: open_releases_page(),
-    )
-    releases_button.pack(
-        anchor="w",
-        padx=18,
-        pady=(0, 8),
-    )
-
-    history_frame = tk.LabelFrame(
-        parent,
-        text="Recent Exports",
-        padx=8,
-        pady=8,
-    )
-    history_frame.pack(
-        fill="both",
-        expand=True,
-        padx=16,
-        pady=(8, 8),
-    )
-
+    about_text.pack(fill="x", padx=18, pady=(18, 8))
+    tk.Button(parent, text="Open Releases Page", command=lambda: open_releases_page()).pack(anchor="w", padx=18, pady=(0, 8))
+    history_frame = tk.LabelFrame(parent, text="Recent Exports", padx=8, pady=8)
+    history_frame.pack(fill="both", expand=True, padx=16, pady=(8, 8))
     tree_container = tk.Frame(history_frame)
-    tree_container.pack(
-        fill="both",
-        expand=True,
-    )
-
+    tree_container.pack(fill="both", expand=True)
     history_scrollbar = tk.Scrollbar(tree_container)
-    history_scrollbar.pack(
-        side="right",
-        fill="y",
-    )
-
-    columns = (
-        "created",
-        "profile",
-        "included",
-        "skipped",
-        "root",
-    )
-    history_tree = ttk.Treeview(
-        tree_container,
-        columns=columns,
-        show="headings",
-        height=9,
-        yscrollcommand=history_scrollbar.set,
-    )
+    history_scrollbar.pack(side="right", fill="y")
+    columns = ("created", "profile", "included", "skipped", "git", "root")
+    history_tree = ttk.Treeview(tree_container, columns=columns, show="headings", height=9, yscrollcommand=history_scrollbar.set)
     history_tree.heading("created", text="Created")
     history_tree.heading("profile", text="Profile")
     history_tree.heading("included", text="Included")
     history_tree.heading("skipped", text="Skipped")
+    history_tree.heading("git", text="Git")
     history_tree.heading("root", text="Project Folder")
-    history_tree.column("created", width=150, anchor="w")
-    history_tree.column("profile", width=70, anchor="center")
-    history_tree.column("included", width=70, anchor="center")
-    history_tree.column("skipped", width=70, anchor="center")
-    history_tree.column("root", width=280, anchor="w")
-    history_tree.pack(
-        side="left",
-        fill="both",
-        expand=True,
-    )
+    history_tree.column("created", width=145, anchor="w")
+    history_tree.column("profile", width=65, anchor="center")
+    history_tree.column("included", width=65, anchor="center")
+    history_tree.column("skipped", width=65, anchor="center")
+    history_tree.column("git", width=140, anchor="center")
+    history_tree.column("root", width=230, anchor="w")
+    history_tree.pack(side="left", fill="both", expand=True)
     history_scrollbar.config(command=history_tree.yview)
-
     entry_lookup: dict[str, HistoryEntry] = {}
+
+    def format_git_cell(entry: HistoryEntry) -> str:
+        if not entry.git_branch and not entry.git_commit_short:
+            return ""
+        branch = entry.git_branch or "(detached)"
+        commit = entry.git_commit_short or ""
+        return f"{branch}@{commit}" if commit else branch
 
     def refresh_history() -> None:
         history_tree.delete(*history_tree.get_children())
         entry_lookup.clear()
-        entries = recent_entries(
-            limit=20,
-            app_dir=application_dir(),
-        )
+        entries = recent_entries(limit=20, app_dir=application_dir())
         if not entries:
-            history_tree.insert(
-                "",
-                "end",
-                values=(
-                    "No exports yet.",
-                    "",
-                    "",
-                    "",
-                    "Build a project context export to see it here.",
-                ),
-            )
+            history_tree.insert("", "end", values=("No exports yet.", "", "", "", "", "Build a project context export to see it here."))
             return
         for entry in entries:
-            item_id = history_tree.insert(
-                "",
-                "end",
-                values=(
-                    entry.created,
-                    entry.profile,
-                    entry.included_count,
-                    entry.skipped_count,
-                    entry.root,
-                ),
-            )
+            item_id = history_tree.insert("", "end", values=(entry.created, entry.profile, entry.included_count, entry.skipped_count, format_git_cell(entry), entry.root))
             entry_lookup[item_id] = entry
-
     refresh_history()
 
     def open_selected_export() -> None:
@@ -199,101 +105,34 @@ def create_about_tab(
             return
         export_dir = Path(entry.export_dir)
         if not export_dir.exists():
-            show_error(
-                "Folder Not Found",
-                f"This export folder no longer exists:\n{export_dir}",
-            )
+            show_error("Folder Not Found", f"This export folder no longer exists:\n{export_dir}")
             return
         open_folder(export_dir)
 
     def clear_export_history() -> None:
-        if not ask_yes_no(
-            "Clear History",
-            (
-                "Remove all recorded export history?\n\n"
-                "This only clears this list. It does not delete any "
-                "actual export files or folders."
-            ),
-        ):
+        if not ask_yes_no("Clear History", "Remove all recorded export history?\n\nThis only clears this list. It does not delete any actual export files or folders."):
             return
         clear_history(app_dir=application_dir())
         refresh_history()
-
     history_buttons = tk.Frame(history_frame)
-    history_buttons.pack(
-        fill="x",
-        pady=(8, 0),
-    )
-    open_export_button = tk.Button(
-        history_buttons,
-        text="Open Selected Export Folder",
-        command=open_selected_export,
-    )
-    open_export_button.pack(side="left")
-    refresh_button = tk.Button(
-        history_buttons,
-        text="Refresh",
-        command=refresh_history,
-    )
-    refresh_button.pack(side="left", padx=(8, 0))
-    clear_button = tk.Button(
-        history_buttons,
-        text="Clear History",
-        command=clear_export_history,
-    )
-    clear_button.pack(side="left", padx=(8, 0))
-
-    update_frame = tk.LabelFrame(
-        parent,
-        text="Updates",
-        padx=12,
-        pady=12,
-    )
-    update_frame.pack(
-        fill="x",
-        padx=16,
-        pady=(8, 8),
-    )
-
+    history_buttons.pack(fill="x", pady=(8, 0))
+    tk.Button(history_buttons, text="Open Selected Export Folder", command=open_selected_export).pack(side="left")
+    tk.Button(history_buttons, text="Refresh", command=refresh_history).pack(side="left", padx=(8, 0))
+    tk.Button(history_buttons, text="Clear History", command=clear_export_history).pack(side="left", padx=(8, 0))
+    update_frame = tk.LabelFrame(parent, text="Updates", padx=12, pady=12)
+    update_frame.pack(fill="x", padx=16, pady=(8, 8))
     mode_note = (
-        "Running as a standalone .exe: updates are downloaded, "
-        "checksum-verified, and swapped in place automatically."
-        if is_frozen()
-        else "Running from source: updates are downloaded and staged "
-        "under 'updates/' for review before being applied."
+        "Running as a standalone .exe: updates are downloaded, checksum-verified, and swapped in place automatically."
+        if is_frozen() else
+        "Running from source: updates are downloaded and staged under 'updates/' for review before being applied."
     )
     update_status = tk.StringVar(value=mode_note)
-    update_label = tk.Label(
-        update_frame,
-        textvariable=update_status,
-        justify="left",
-        anchor="w",
-        wraplength=720,
-    )
-    update_label.pack(fill="x", pady=(0, 10))
-
-    startup_check = tk.Checkbutton(
-        update_frame,
-        text="Automatically check for and download updates on startup",
-        variable=state.check_updates_startup_var,
-    )
-    startup_check.pack(anchor="w")
-
-    auto_install_check = tk.Checkbutton(
-        update_frame,
-        text=(
-            "Automatically install downloaded updates "
-            "(overwrites current files/exe after a backup)"
-        ),
-        variable=state.auto_install_var,
-    )
-    auto_install_check.pack(anchor="w", pady=(4, 0))
+    tk.Label(update_frame, textvariable=update_status, justify="left", anchor="w", wraplength=720).pack(fill="x", pady=(0, 10))
+    tk.Checkbutton(update_frame, text="Automatically check for and download updates on startup", variable=state.check_updates_startup_var).pack(anchor="w")
+    tk.Checkbutton(update_frame, text="Automatically install downloaded updates (overwrites current files/exe after a backup)", variable=state.auto_install_var).pack(anchor="w", pady=(4, 0))
 
     def perform_exe_update(info) -> None:
-        update_status.set(
-            f"Update available: {info.latest_version}. Downloading and "
-            "verifying checksum..."
-        )
+        update_status.set(f"Update available: {info.latest_version}. Downloading and verifying checksum...")
         window.update_idletasks()
         try:
             staged_path = stage_exe_update(info)
@@ -302,33 +141,11 @@ def create_about_tab(
             show_error("Update Download Failed", str(exc))
             return
         if not state.auto_install_var.get():
-            update_status.set(
-                f"Update {info.latest_version} downloaded and verified. "
-                f"Staged at:\n{staged_path}"
-            )
-            show_info(
-                "Update Downloaded",
-                (
-                    f"Version {info.latest_version} was downloaded and "
-                    f"checksum-verified.\n\nStaged at:\n{staged_path}\n\n"
-                    "Enable 'Automatically install downloaded updates' "
-                    "so future updates are swapped in automatically, or "
-                    "apply this one from the next check."
-                ),
-            )
+            update_status.set(f"Update {info.latest_version} downloaded and verified. Staged at:\n{staged_path}")
+            show_info("Update Downloaded", f"Version {info.latest_version} was downloaded and checksum-verified.\n\nStaged at:\n{staged_path}\n\nEnable 'Automatically install downloaded updates' so future updates are swapped in automatically, or apply this one from the next check.")
             return
-        if not ask_yes_no(
-            "Install Update",
-            (
-                f"Install version {info.latest_version} now?\n\n"
-                "The application will close, the update will be applied, "
-                "and it will relaunch automatically. This usually takes "
-                "a few seconds."
-            ),
-        ):
-            update_status.set(
-                f"Update {info.latest_version} downloaded, not installed."
-            )
+        if not ask_yes_no("Install Update", f"Install version {info.latest_version} now?\n\nThe application will close, the update will be applied, and it will relaunch automatically. This usually takes a few seconds."):
+            update_status.set(f"Update {info.latest_version} downloaded, not installed.")
             return
         try:
             apply_exe_update(staged_path, current_version=APP_VERSION)
@@ -340,9 +157,7 @@ def create_about_tab(
         sys.exit(0)
 
     def perform_script_update(info) -> None:
-        update_status.set(
-            f"Update available: {info.latest_version}. Downloading..."
-        )
+        update_status.set(f"Update available: {info.latest_version}. Downloading...")
         window.update_idletasks()
         try:
             staged_dir = download_update(info)
@@ -350,19 +165,8 @@ def create_about_tab(
             update_status.set(f"Update download failed: {exc}")
             return
         if not state.auto_install_var.get():
-            update_status.set(
-                f"Update {info.latest_version} downloaded to:\n{staged_dir}"
-            )
-            show_info(
-                "Update Downloaded",
-                (
-                    f"Version {info.latest_version} was downloaded and "
-                    f"staged in:\n{staged_dir}\n\n"
-                    "Review the staged files and restart to apply, or "
-                    "enable 'Automatically install downloaded updates' so "
-                    "future updates are applied without a manual step."
-                ),
-            )
+            update_status.set(f"Update {info.latest_version} downloaded to:\n{staged_dir}")
+            show_info("Update Downloaded", f"Version {info.latest_version} was downloaded and staged in:\n{staged_dir}\n\nReview the staged files and restart to apply, or enable 'Automatically install downloaded updates' so future updates are applied without a manual step.")
             return
         update_status.set(f"Installing update {info.latest_version}...")
         window.update_idletasks()
@@ -370,29 +174,10 @@ def create_about_tab(
             result = apply_staged_update(staged_dir)
         except Exception as exc:
             update_status.set(f"Update install failed: {exc}")
-            show_error(
-                "Update Install Failed",
-                (
-                    f"{exc}\n\n"
-                    "The application's previous files, if a backup was "
-                    "completed before the failure, can be found under:\n"
-                    f"{application_dir() / 'updates' / 'backups'}"
-                ),
-            )
+            show_error("Update Install Failed", f"{exc}\n\nThe application's previous files, if a backup was completed before the failure, can be found under:\n{application_dir() / 'updates' / 'backups'}")
             return
-        update_status.set(
-            f"Update {info.latest_version} installed. Restart to finish."
-        )
-        show_info(
-            "Update Installed",
-            (
-                f"Version {info.latest_version} was installed over the "
-                "current application files.\n\n"
-                f"Backup of the previous version:\n{result.backup_dir}\n\n"
-                f"Files updated: {len(result.applied_files)}\n\n"
-                "Restart the application to run the new version."
-            ),
-        )
+        update_status.set(f"Update {info.latest_version} installed. Restart to finish.")
+        show_info("Update Installed", f"Version {info.latest_version} was installed over the current application files.\n\nBackup of the previous version:\n{result.backup_dir}\n\nFiles updated: {len(result.applied_files)}\n\nRestart the application to run the new version.")
 
     def perform_auto_update() -> None:
         update_status.set("Checking for updates...")
@@ -413,5 +198,4 @@ def create_about_tab(
     def startup_update_check() -> None:
         if state.check_updates_startup_var.get():
             perform_auto_update()
-
     return startup_update_check

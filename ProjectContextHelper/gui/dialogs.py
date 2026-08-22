@@ -3,98 +3,61 @@ import os
 import tkinter as tk
 from tkinter import messagebox
 
-from models import BuildResult
+from core.models import BuildResult
 
 
 def open_folder(path: Path) -> None:
-    """
-    Open a folder in the operating system's file browser.
-
-    os.startfile works on Windows.
-    Other systems receive a readable message instead.
-    """
     try:
         os.startfile(path)
     except AttributeError:
-        messagebox.showinfo(
-            "Open Folder",
-            f"Export folder:\n{path}",
-        )
+        messagebox.showinfo("Open Folder", f"Export folder:\n{path}")
     except Exception as exc:
-        messagebox.showerror(
-            "Open Folder Failed",
-            str(exc),
-        )
+        messagebox.showerror("Open Folder Failed", str(exc))
 
 
-def show_error(
-    title: str,
-    message: str,
-) -> None:
+def show_error(title: str, message: str) -> None:
+    messagebox.showerror(title, message)
+
+
+def show_warning(title: str, message: str) -> None:
+    messagebox.showwarning(title, message)
+
+
+def show_info(title: str, message: str) -> None:
+    messagebox.showinfo(title, message)
+
+
+def ask_yes_no(title: str, message: str) -> bool:
+    return messagebox.askyesno(title, message)
+
+
+def format_git_line(result: BuildResult) -> str:
     """
-    Show an error dialog.
+    New in this release. The previous version's show_build_complete()
+    had no equivalent -- it never mentioned git at all, since
+    BuildResult there had no git_branch/git_commit_short/git_is_dirty
+    fields.
     """
-    messagebox.showerror(
-        title,
-        message,
-    )
+    if not result.git_branch and not result.git_commit_short:
+        return ""
+    branch_display = result.git_branch or "(detached HEAD)"
+    commit_display = result.git_commit_short or "unknown"
+    if result.git_is_dirty is None:
+        dirty_display = "unverified"
+    elif result.git_is_dirty:
+        dirty_display = "dirty"
+    else:
+        dirty_display = "clean"
+    return f"Git: {branch_display} @ {commit_display} ({dirty_display})\n\n"
 
 
-def show_warning(
-    title: str,
-    message: str,
-) -> None:
-    """
-    Show a warning dialog.
-    """
-    messagebox.showwarning(
-        title,
-        message,
-    )
-
-
-def show_info(
-    title: str,
-    message: str,
-) -> None:
-    """
-    Show an info dialog.
-    """
-    messagebox.showinfo(
-        title,
-        message,
-    )
-
-
-def ask_yes_no(
-    title: str,
-    message: str,
-) -> bool:
-    """
-    Show a yes/no question dialog.
-    """
-    return messagebox.askyesno(
-        title,
-        message,
-    )
-
-
-def show_build_complete(
-    result: BuildResult,
-) -> None:
-    """
-    Show build completion details.
-    """
-    snapshot_line = ""
-
-    if result.snapshot_path:
-        snapshot_line = f"\n- {result.snapshot_path}"
-
+def show_build_complete(result: BuildResult) -> None:
+    snapshot_line = f"\n- {result.snapshot_path}" if result.snapshot_path else ""
     messagebox.showinfo(
         "Build Complete",
         (
-            f"Export Folder:\n"
-            f"{result.export_dir}\n\n"
+            f"Export Folder:\n{result.export_dir}\n\n"
+            f"{format_git_line(result)}"
             f"Included Files: {result.included_count}\n"
             f"Skipped Files: {result.skipped_count}"
             f"{snapshot_line}"
