@@ -3,18 +3,17 @@ Project Context Helper - Entry Point
 This is the ONLY file meant to be run directly. Everything else lives
 in a purpose-built subfolder:
     core/      the scan + export engine
-    services/  stateful support services (app settings, build history,
-               settings memory, custom profile manager, self-updates)
+    services/  storage.py (all settings/profile/history persistence,
+               consolidated into one file) + updater.py (self-updates)
     cli/       the argparse-based command-line interface
     gui/       the tkinter desktop interface
     docs/      CHANGELOG.md, README.md, and ARCHITECTURE.md
 
-The previous version of this tool (v2.3.5) had run.py containing only
-`from cli import main` at the project root, alongside every other
-module (constants.py, core.py, cli.py, etc.) flat in the same folder.
-This version's run.py additionally bootstraps sys.path so the new
-subfolder structure resolves correctly regardless of the working
-directory the process is launched from.
+All saving/loading of App Preferences, Last Used Settings, Custom
+Profiles, and Build History goes through services/storage.py -- a
+single consolidated module. No other file in this app performs direct
+file I/O against app_settings.json, last_export_settings.json,
+custom_profiles.json, or build_history.json.
 
 Usage:
     python run.py                      Launch the desktop GUI

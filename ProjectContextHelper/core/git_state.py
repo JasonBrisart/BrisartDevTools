@@ -2,10 +2,6 @@
 Git Repository State
 Pure Python, no external dependencies, no subprocess calls into a
 git binary. Extras/optional feature: opt-in, off by default.
-This module did not exist prior to this release -- the previous
-version of this tool (v2.3.5, the version this release replaces) had
-no concept of git state anywhere in core.py, models.py, exporters.py,
-or cli.py.
 """
 from __future__ import annotations
 

@@ -22,6 +22,7 @@ from core.constants import (
     RELEASES_URL,
     STAGED_EXE_FILENAME,
 )
+from services.storage import application_dir
 
 UPDATES_DIRNAME = "updates"
 BACKUPS_DIRNAME = "backups"
@@ -29,13 +30,15 @@ PROTECTED_NAMES = {UPDATES_DIRNAME, EXPORTS_DIRNAME, "__pycache__", ".git", "dow
 
 
 def is_frozen() -> bool:
+    """
+    Kept here (rather than only in services.storage) since this
+    module's own update-staging logic branches on frozen-vs-source
+    mode in several places beyond just resolving a folder path.
+    application_dir() itself is now imported directly from
+    services.storage -- the single shared implementation -- instead
+    of duplicating it here.
+    """
     return bool(getattr(sys, "frozen", False))
-
-
-def application_dir() -> Path:
-    if is_frozen():
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent.parent
 
 
 @dataclass(slots=True)
@@ -76,27 +79,6 @@ def version_slug(value: str) -> str:
 
 
 def strip_release_tag_prefix(tag_name: str, tag_prefix: str = RELEASE_TAG_PREFIX) -> str:
-    """
-    Extract just the version portion of a release tag for display
-    purposes. GitHub releases in the shared BrisartDevTools monorepo
-    are tagged like "project-context-helper-v3.0.0"; this strips that
-    known prefix so latest_version is clean for every user-facing
-    message rather than showing the full internal tag string.
-    The previous version of this tool (v2.3.5) had no equivalent of
-    this function -- its check_for_updates() used
-    `payload.get("tag_name") or payload.get("name") or APP_VERSION`
-    directly as latest_version with no stripping at all, so every
-    update-related message (CLI stdout, the GUI's Updates status
-    text, and its dialogs) would have displayed the full raw tag
-    (e.g. "project-context-helper-v9.9.9") instead of a clean version
-    number. This did not affect whether an update was correctly
-    detected as newer (is_newer_version()/normalize_version() already
-    stripped non-digit characters), only what text was shown.
-    Matching a release by tag prefix (find_latest_release_payload())
-    and choosing a download asset (resolve_asset()) both still
-    operate on the untouched, full tag_name -- only display text is
-    affected by this function.
-    """
     if tag_name.startswith(tag_prefix):
         return tag_name[len(tag_prefix):]
     return tag_name

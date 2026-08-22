@@ -1,7 +1,7 @@
 from core.models import ScanSettings
 
 APP_NAME = "Project Context Helper"
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.1.0"
 AUTHOR = "Jason Brisart"
 REPOSITORY_NAME = "BrisartDevTools"
 REPOSITORY_URL = "https://github.com/JasonBrisart/BrisartDevTools"
@@ -20,13 +20,17 @@ SUMMARY_FILENAME = "PROJECT_SUMMARY.txt"
 SNAPSHOT_FILENAME = "PROJECT_SNAPSHOT.zip"
 SETTINGS_FILENAME = "PROJECT_CONTEXT_SETTINGS.json"
 
+# All four of these filenames are now read/written exclusively by
+# services/storage.py -- no other module in this app touches them
+# directly. Previously each had its own dedicated module
+# (services/app_settings.py, services/settings_memory.py,
+# services/profile_manager.py, services/history.py), each with its
+# own near-duplicate application_dir() resolution helper. Those four
+# modules were removed and consolidated into storage.py.
 BUILD_HISTORY_FILENAME = "build_history.json"
 MAX_HISTORY_ENTRIES = 50
-
 APP_SETTINGS_FILENAME = "app_settings.json"
-
 LAST_SETTINGS_FILENAME = "last_export_settings.json"
-
 CUSTOM_PROFILES_FILENAME = "custom_profiles.json"
 
 STAGED_EXE_FILENAME = "staged_update.exe"

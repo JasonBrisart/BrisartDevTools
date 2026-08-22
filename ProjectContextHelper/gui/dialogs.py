@@ -32,12 +32,6 @@ def ask_yes_no(title: str, message: str) -> bool:
 
 
 def format_git_line(result: BuildResult) -> str:
-    """
-    New in this release. The previous version's show_build_complete()
-    had no equivalent -- it never mentioned git at all, since
-    BuildResult there had no git_branch/git_commit_short/git_is_dirty
-    fields.
-    """
     if not result.git_branch and not result.git_commit_short:
         return ""
     branch_display = result.git_branch or "(detached HEAD)"

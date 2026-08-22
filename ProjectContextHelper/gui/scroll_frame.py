@@ -1,9 +1,7 @@
 """
 Scrollable Frame
 A small reusable helper that wraps a tab's content in a vertically
-scrollable area. This module did not exist in the previous version of
-this tool (v2.3.5) -- its options_tab.py packed widgets directly into
-the tab's Frame with no scroll support at all.
+scrollable area.
 No external dependencies; pure tkinter.
 """
 import tkinter as tk

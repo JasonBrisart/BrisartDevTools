@@ -9,12 +9,6 @@ def create_extras_tab(
     parent: tk.Frame,
     state: GuiState,
 ) -> None:
-    """
-    This entire tab is new in this release. The previous version of
-    this tool (v2.3.5) had only 3 tabs -- Build, Options, About -- and
-    gui/main_gui.py's notebook.add() calls built exactly those three,
-    in that order, with no fourth "Extras" tab at all.
-    """
     content = create_scrollable_area(parent)
 
     intro = tk.Label(

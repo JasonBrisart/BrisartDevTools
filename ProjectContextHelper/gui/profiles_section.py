@@ -13,7 +13,7 @@ from gui.dialogs import (
     show_info,
     show_warning,
 )
-from services import profile_manager
+from services import storage
 
 
 def create_custom_profiles_section(
@@ -21,8 +21,9 @@ def create_custom_profiles_section(
     state: GuiState,
 ) -> None:
     """
-    This entire section is new in this release. There is no
-    equivalent anywhere in the previous version (v2.3.5).
+    Every Save / Load / Delete / list action here goes exclusively
+    through services.storage -- the single consolidated storage
+    module. No file I/O happens in this module directly.
     """
     frame = tk.LabelFrame(parent, text="Custom Profiles", padx=12, pady=12)
     frame.pack(fill="x", padx=16, pady=(8, 16))
@@ -47,7 +48,7 @@ def create_custom_profiles_section(
     name_combo.grid(row=1, column=1, columnspan=3, sticky="w", pady=4)
 
     def refresh_names() -> None:
-        name_combo["values"] = profile_manager.list_profiles()
+        name_combo["values"] = storage.list_profiles()
 
     refresh_names()
 
@@ -56,7 +57,7 @@ def create_custom_profiles_section(
         if not name:
             show_warning("Name Required", "Type a name for this custom profile first.")
             return
-        if profile_manager.is_reserved_name(name):
+        if storage.is_reserved_name(name):
             show_warning(
                 "Reserved Name",
                 f"'{name}' is a built-in profile name ('{PROFILE_STANDARD}' / '{PROFILE_ARCHIVE}') "
@@ -68,11 +69,11 @@ def create_custom_profiles_section(
         except ValueError as exc:
             show_warning("Invalid Settings", str(exc))
             return
-        if name in profile_manager.list_profiles():
+        if name in storage.list_profiles():
             if not ask_yes_no("Overwrite Profile", f"A custom profile named '{name}' already exists. Overwrite it with the current settings?"):
                 return
         try:
-            profile_manager.save_profile(name, settings)
+            storage.save_profile(name, settings)
         except ValueError as exc:
             show_error("Could Not Save Profile", str(exc))
             return
@@ -84,7 +85,7 @@ def create_custom_profiles_section(
         if not name:
             show_warning("No Profile Selected", "Choose a custom profile to load first.")
             return
-        loaded = profile_manager.load_profile(name)
+        loaded = storage.load_profile(name)
         if loaded is None:
             show_error("Profile Not Found", f"No custom profile named '{name}' was found.")
             refresh_names()
@@ -99,7 +100,7 @@ def create_custom_profiles_section(
             return
         if not ask_yes_no("Delete Profile", f"Delete custom profile '{name}'? This cannot be undone."):
             return
-        deleted = profile_manager.delete_profile(name)
+        deleted = storage.delete_profile(name)
         refresh_names()
         if deleted:
             state.custom_profile_var.set("")

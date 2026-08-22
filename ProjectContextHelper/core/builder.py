@@ -15,7 +15,7 @@ from core.exporters import (
     create_snapshot_zip,
 )
 from core.git_state import build_git_state
-from services.history import (
+from services.storage import (
     HistoryEntry,
     append_history_entry,
 )
@@ -32,6 +32,11 @@ from core.utils import (
 
 
 def create_context(root: Path, settings: ScanSettings | None = None) -> BuildResult:
+    """
+    Note: build history is recorded via services.storage.append_history_entry()
+    -- the single consolidated storage module -- not a dedicated
+    services/history.py module (removed; see services/storage.py).
+    """
     root = validate_root(root)
     settings = settings or ScanSettings()
     created = timestamp_now()

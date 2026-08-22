@@ -15,12 +15,6 @@ from gui.about_tab import create_about_tab
 
 
 def run_gui() -> None:
-    """
-    The previous version of this tool (v2.3.5) built exactly 3 tabs
-    here: Build, Options, About -- in that order, via three
-    notebook.add() calls. This version adds a fourth "Extras" tab
-    between Options and About.
-    """
     window = tk.Tk()
     window.title(f"{APP_NAME} v{APP_VERSION}")
     window.geometry("860x760")

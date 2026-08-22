@@ -12,11 +12,7 @@ from core.constants import (
 from core.builder import create_context
 from core.utils import normalize_extension
 from gui.main_gui import run_gui
-from services import profile_manager
-from services.settings_memory import (
-    load_last_settings,
-    save_last_settings,
-)
+from services import storage
 from services.updater import (
     apply_exe_update,
     apply_staged_update,
@@ -28,20 +24,6 @@ from services.updater import (
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """
-    The previous version of this tool (v2.3.5) had these flags:
-    root, --profile, --output-dir, --max-file-bytes, --max-total-bytes,
-    --extensions, --exclude-dir, --exclude-file, --no-zip, --no-redact,
-    --no-hashes, --no-line-counts, --no-tree, --no-index, --no-contents,
-    --no-skipped-details, --skipped-details-limit, --flat-output,
-    --check-updates, --install-updates, --open-releases.
-    Every flag below through --git-state-commit-limit is new in this
-    release (Git State detection); --use-last-settings and
-    --remember-settings are new (always-on settings memory, GUI-only,
-    with matching explicit opt-in CLI flags); --load-profile,
-    --save-profile, --delete-profile, and --list-profiles are new
-    (Custom Profiles).
-    """
     parser = argparse.ArgumentParser(description=f"{APP_NAME} v{APP_VERSION}")
     parser.add_argument("root", nargs="?", help="Project folder to export. If omitted, GUI mode launches.")
     parser.add_argument("--profile", choices=sorted(VALID_PROFILES), default=DEFAULT_PROFILE)
@@ -77,13 +59,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def settings_from_args(args):
+    """
+    All settings persistence here (--use-last-settings,
+    --remember-settings, --load-profile, --save-profile,
+    --delete-profile, --list-profiles) goes exclusively through
+    services.storage -- the single consolidated storage module.
+    """
     settings = settings_for_profile(args.profile)
     if args.use_last_settings:
-        remembered = load_last_settings()
+        remembered = storage.load_last_settings()
         if remembered is not None:
             settings = remembered
     if args.load_profile:
-        loaded = profile_manager.load_profile(args.load_profile)
+        loaded = storage.load_profile(args.load_profile)
         if loaded is not None:
             settings = loaded
         else:
@@ -164,7 +152,7 @@ def run_update_check(open_page_when_available: bool = False, install: bool = Fal
 
 
 def run_profile_list() -> None:
-    names = profile_manager.list_profiles()
+    names = storage.list_profiles()
     print(f"{APP_NAME} v{APP_VERSION}")
     print()
     if names:
@@ -176,7 +164,7 @@ def run_profile_list() -> None:
 
 
 def run_profile_delete(name: str) -> None:
-    deleted = profile_manager.delete_profile(name)
+    deleted = storage.delete_profile(name)
     print(f"{APP_NAME} v{APP_VERSION}")
     print()
     if deleted:
@@ -212,11 +200,11 @@ def run_cli() -> None:
     result = create_context(Path(args.root), settings=settings)
 
     if args.remember_settings:
-        save_last_settings(settings)
+        storage.save_last_settings(settings)
 
     if args.save_profile:
         try:
-            profile_manager.save_profile(args.save_profile, settings)
+            storage.save_profile(args.save_profile, settings)
             print(f"Saved custom profile '{args.save_profile}'.")
         except ValueError as exc:
             print(f"Could not save custom profile: {exc}")

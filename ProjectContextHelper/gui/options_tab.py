@@ -8,14 +8,6 @@ def create_options_tab(
     parent: tk.Frame,
     state: GuiState,
 ) -> None:
-    """
-    The previous version of this tool (v2.3.5) packed these same two
-    sections (Export Settings, Included Output Sections) directly
-    into a plain, non-scrollable tk.Frame with no Extras or Custom
-    Profiles content at all. This version wraps the same two sections
-    in a scrollable area (gui/scroll_frame.py) as a safety net for
-    future growth.
-    """
     content = create_scrollable_area(parent)
 
     settings_frame = tk.LabelFrame(content, text="Export Settings", padx=12, pady=12)

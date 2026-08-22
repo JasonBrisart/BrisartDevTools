@@ -16,15 +16,15 @@ from gui.dialogs import (
     show_error,
     show_info,
 )
-from services.history import (
+from services.storage import (
     HistoryEntry,
+    application_dir,
     clear_history,
     recent_entries,
 )
 from services.updater import (
     apply_exe_update,
     apply_staged_update,
-    application_dir,
     check_for_updates,
     download_update,
     is_frozen,
@@ -35,10 +35,10 @@ from services.updater import (
 
 def create_about_tab(parent: tk.Frame, window: tk.Tk, state: GuiState):
     """
-    The previous version's history_tree had columns ("created",
-    "profile", "included", "skipped", "root") -- 5 columns, no "git"
-    column. This version adds a "git" column between "skipped" and
-    "root".
+    Recent Exports history (HistoryEntry, clear_history, recent_entries)
+    and application_dir() are both imported from services.storage --
+    the single consolidated storage module -- not a dedicated
+    services/history.py module.
     """
     about_text = tk.Label(
         parent, justify="left", anchor="nw", wraplength=760,

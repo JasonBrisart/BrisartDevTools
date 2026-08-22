@@ -3,12 +3,10 @@ from dataclasses import dataclass
 from pathlib import Path
 import tkinter as tk
 
-from services.app_settings import (
+from services.storage import (
     AppPreferences,
     load_preferences,
     save_preferences,
-)
-from services.settings_memory import (
     load_last_settings,
     save_last_settings,
 )
@@ -28,18 +26,6 @@ from core.models import (
 
 @dataclass(slots=True)
 class GuiState:
-    """
-    The previous version of this tool (v2.3.5) had exactly these
-    GuiState fields: selected_folder, profile_var, output_dir_var,
-    max_file_mb_var, max_total_mb_var, skipped_limit_var,
-    include_zip_var, redact_var, include_hashes_var,
-    include_line_counts_var, include_tree_var, include_index_var,
-    include_contents_var, include_skipped_details_var,
-    timestamped_folder_var, open_after_build_var,
-    check_updates_startup_var, auto_install_var, status_text,
-    last_export_dir. include_git_state_var and custom_profile_var
-    below are both new in this release.
-    """
     selected_folder: tk.StringVar
     profile_var: tk.StringVar
     output_dir_var: tk.StringVar
@@ -76,6 +62,10 @@ def make_bool_var(value: bool) -> tk.BooleanVar:
 
 
 def wire_preference_autosave(state: GuiState) -> None:
+    """
+    Persists via services.storage.save_preferences() -- the single
+    consolidated storage module -- immediately on every change.
+    """
     def persist(*_args) -> None:
         save_preferences(
             AppPreferences(
@@ -92,11 +82,9 @@ def wire_preference_autosave(state: GuiState) -> None:
 def make_gui_state() -> GuiState:
     """
     The previously-saved settings from the most recent successful
-    build are ALWAYS loaded here, unconditionally, in place of the
-    selected profile's plain defaults. The previous version of this
-    tool (v2.3.5) had no equivalent -- make_gui_state() there always
-    started from settings_for_profile(DEFAULT_PROFILE) with no
-    memory of any prior session at all.
+    build are ALWAYS loaded here, unconditionally, via
+    services.storage.load_last_settings(), in place of the selected
+    profile's plain defaults.
     """
     settings = settings_for_profile(DEFAULT_PROFILE)
     preferences = load_preferences()
@@ -208,6 +196,11 @@ def build_settings_from_state(state: GuiState) -> ScanSettings:
 
 
 def run_project_build(state: GuiState) -> BuildResult:
+    """
+    Settings are always remembered via services.storage.save_last_settings()
+    after every successful build -- the single consolidated storage
+    module -- unconditionally, with no toggle to disable it.
+    """
     folder = state.selected_folder.get().strip()
     if not folder:
         raise ValueError("Please select a project folder first.")

@@ -16,11 +16,8 @@ ProjectContextHelper/
 │   ├── builder.py                   orchestrates one full build (create_context)
 │   └── utils.py                      hashing, redaction, timestamps, language hints
 ├── services/                 stateful support services
-│   ├── app_settings.py          persists remaining GUI preference toggles
-│   ├── settings_memory.py        always-on last-used-settings save/load (GUI)
-│   ├── profile_manager.py         Custom Profiles: named snapshots (Save/Load/Delete)
-│   ├── history.py                  records recent exports (About tab list)
-│   └── updater.py                   self-update check / download / install
+│   ├── storage.py               ALL settings/profile/history persistence (single file)
+│   └── updater.py                self-update check / download / install
 ├── cli/                      command-line interface
 │   └── cli.py                    argparse wiring, calls core.builder directly
 └── gui/                      tkinter desktop interface
@@ -35,37 +32,65 @@ ProjectContextHelper/
     └── dialogs.py                       shared message-box helpers
 ```
 
-## Prior layout (before this release)
+## Storage consolidation: one file for all persisted state
 
-The version this release replaces (v2.3.5) had a flat layout: every
-module (`__init__.py`, `app_settings.py`, `cli.py`, `constants.py`,
-`core.py`, `exporters.py`, `history.py`, `models.py`, `run.py`,
-`scanner.py`, `updater.py`, `utils.py`) sat directly at the project
-root, alongside a `gui/` folder containing exactly six files
-(`about_tab.py`, `build_tab.py`, `builders.py`, `dialogs.py`,
-`main_gui.py`, `options_tab.py`). `git_state.py`,
-`profile_manager.py`, `settings_memory.py`, `scroll_frame.py`,
-`extras_tab.py`, and `profiles_section.py` did not exist at all.
+**`services/storage.py` is the single, exclusive place every kind of
+persisted application state (other than a build's own output files)
+is read and written.** Nothing else in this app performs direct file
+I/O against `app_settings.json`, `last_export_settings.json`,
+`custom_profiles.json`, or `build_history.json`.
 
-## Settings persistence: three distinct mechanisms
+Prior to this consolidation, this same functionality was spread
+across four separate modules:
+
+| Old module | Replaced section in storage.py | File |
+|---|---|---|
+| `services/app_settings.py` | App Preferences | `app_settings.json` |
+| `services/settings_memory.py` | Last Used Settings | `last_export_settings.json` |
+| `services/profile_manager.py` | Custom Profiles | `custom_profiles.json` |
+| `services/history.py` | Build History | `build_history.json` |
+
+Each of those four modules independently re-implemented the same
+`application_dir()` resolution helper (frozen-executable vs.
+source-mode folder resolution). That duplication is exactly the kind
+of thing that lets small inconsistencies creep in silently over
+time — one copy gets updated or fixed, another doesn't. `storage.py`
+has exactly one `application_dir()` implementation, used by every
+section in the file.
+
+**Every other module that needs any of this state imports directly
+from `services.storage`:**
+- `core/builder.py` imports `HistoryEntry`, `append_history_entry`
+- `cli/cli.py` imports the whole module as `storage` and calls
+  `storage.load_last_settings()`, `storage.save_profile()`, etc.
+- `gui/builders.py` imports `AppPreferences`, `load_preferences`,
+  `save_preferences`, `load_last_settings`, `save_last_settings`
+- `gui/profiles_section.py` imports the whole module as `storage`
+- `gui/about_tab.py` imports `HistoryEntry`, `application_dir`,
+  `clear_history`, `recent_entries`
+
+`services/updater.py` (a separate concern — downloading and applying
+application updates, not user settings) now also imports
+`application_dir` directly from `services.storage` rather than
+maintaining its own duplicate copy, so there is exactly one
+implementation of "where does this app's data live" in the entire
+codebase.
+
+## Settings persistence: three distinct mechanisms, one storage layer
 
 1. **Built-in profile defaults** (`core/constants.py`) — `standard`
-   and `archive`. Unchanged from the prior version.
-2. **Last-used settings, always-on** (`services/settings_memory.py`)
-   — GUI-only, no toggle, no way to disable. New in this release; the
-   prior version's `make_gui_state()` always started from
-   `settings_for_profile(DEFAULT_PROFILE)` with no memory of any
-   previous session. The CLI's `--remember-settings` /
-   `--use-last-settings` flags (also new) read/write the same file
-   but remain explicit opt-in for scripting determinism.
-3. **Custom Profiles** (`services/profile_manager.py`) — named,
-   multi-slot, always explicit Save/Load/Delete. Entirely new; the
-   prior version had no equivalent.
+   and `archive`.
+2. **Last-used settings, always-on** (`services/storage.py`, section 3)
+   — GUI-only, no toggle, no way to disable. The CLI's
+   `--remember-settings` / `--use-last-settings` flags read/write the
+   same file but remain explicit opt-in for scripting determinism.
+3. **Custom Profiles** (`services/storage.py`, section 4) — named,
+   multi-slot, always explicit Save/Load/Delete.
 
-`load_profile()`, `delete_profile()`, and `profile_exists()` in
-`profile_manager.py` all strip leading/trailing whitespace from the
-requested name before looking it up, matching `save_profile()`'s
-existing behavior of always storing a stripped name.
+`load_profile()`, `delete_profile()`, and `profile_exists()` all
+strip leading/trailing whitespace from the requested name before
+looking it up, matching `save_profile()`'s existing behavior of
+always storing a stripped name.
 
 ## Why this split
 
@@ -78,62 +103,36 @@ existing behavior of always storing a stripped name.
 whether "last used settings" persist automatically (GUI: yes, always)
 or only on request (CLI: opt-in flags only).
 
-## Update checking and version display
+## GUI: four tabs
 
-`services/updater.py` filters GitHub's full releases list down to
-just this tool's releases using `RELEASE_TAG_PREFIX` (releases are
-tagged like `project-context-helper-v3.0.0` in the shared
-BrisartDevTools monorepo, alongside other independently-versioned
-tools) — this filtering logic is unchanged from the prior version.
-New in this release: `strip_release_tag_prefix()` removes that prefix
-before the version is used in any user-facing message, so what's
-shown is a clean version string rather than the full internal tag
-name (the prior version displayed the raw tag verbatim in every
-update message). This only affects display text — matching a release
-by tag prefix and choosing a download asset both still operate on the
-untouched, full `tag_name` from the GitHub API.
+1. **Build** 2. **Options** 3. **Extras** 4. **About**
 
-## GUI: four tabs (was three)
-
-1. **Build** 2. **Options** 3. **Extras** *(new)* 4. **About**
-
-The prior version built exactly three tabs — Build, Options, About —
-with no Extras tab, and Options had no Extras or Custom Profiles
-content to begin with (it only ever had Export Settings and Included
-Output Sections). Both Options and Extras now wrap their content in a
-scrollable area (`gui/scroll_frame.py`, also new).
+Both Options and Extras wrap their content in a scrollable area
+(`gui/scroll_frame.py`).
 
 ## Core vs. Extras vs. Custom Profiles
 
-1. **Core output toggles** (Options tab). Same two sections
-   (Export Settings, Included Output Sections) as the prior version.
+1. **Core output toggles** (Options tab).
 2. **Extras (optional)** (Extras tab, top section) — currently just
-   `include_git_state`. Entirely new category.
+   `include_git_state`.
 3. **Custom Profiles** (Extras tab, bottom section) — named,
-   multi-slot, explicit Save/Load/Delete. Entirely new.
+   multi-slot, explicit Save/Load/Delete.
 
 ## Shared settings serialization
 
-`core/models.py`'s `ScanSettings.to_jsonable()` (present in the prior
-version) and the new `ScanSettings.from_jsonable()` are the single
-shared conversion path used by both `services/settings_memory.py` and
-`services/profile_manager.py`.
+`core/models.py`'s `ScanSettings.to_jsonable()` /
+`ScanSettings.from_jsonable()` are the single shared conversion path
+used by every section of `services/storage.py` that persists a
+`ScanSettings` (Last Used Settings and Custom Profiles both use it).
 
 ## Import convention
 
 `run.py` inserts the project root onto `sys.path` before importing
-anything else -- new in this release, required by the move to
-subfolders. The prior version's `run.py` was a single line
-(`from cli import main`) with no path bootstrapping needed, since
-everything sat flat at the root already.
+anything else.
 
-## App-data file locations
+## App-data file location
 
-`services/app_settings.py`, `services/settings_memory.py`,
-`services/profile_manager.py`, `services/history.py`, and
-`services/updater.py` each resolve an `application_dir()` that points
-to the project root (the folder containing `run.py`). The prior
-version's equivalent modules resolved this as `Path(__file__).parent`
-directly (a single `.parent`, appropriate since they lived at the
-root); the new versions resolve `.parent.parent` to compensate for
-now living one level deeper, inside `services/`.
+`services/storage.py`'s single `application_dir()` (also reused by
+`services/updater.py`) resolves to the project root (the folder
+containing `run.py`) in source mode, or the folder containing the
+compiled `.exe` when frozen.
