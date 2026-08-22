@@ -163,6 +163,23 @@ def verify_digest(data: bytes, digest: str) -> None:
 
 
 def download_update(info: UpdateInfo, dest_dir: Path | None = None, timeout_seconds: int = 60) -> Path:
+    """
+    Bugfix (v3.1.2): a downloaded archive that failed to extract
+    (zipfile.BadZipFile -- e.g. from a truncated download, a network
+    hiccup, or a CDN serving an error page instead of the real asset)
+    was previously caught and silently ignored (`except
+    zipfile.BadZipFile: pass`), after which this function still
+    returned dest_dir as if everything had succeeded. Downstream,
+    apply_staged_update() -> find_release_root() would find nothing
+    but the raw download.zip sitting in that folder, and
+    apply_extracted_update() explicitly skips a file literally named
+    "download.zip" -- so the entire update would silently apply ZERO
+    files, while every caller (both the CLI and the GUI) reported
+    "Update Installed" / "Files updated: 0" as if nothing had gone
+    wrong. A corrupted download attempting to overwrite the running
+    application now raises a clear, descriptive error instead of
+    completing as a silent no-op.
+    """
     if not info.download_url:
         raise ValueError("No download URL is available for this release.")
     if dest_dir is None:
@@ -178,8 +195,13 @@ def download_update(info: UpdateInfo, dest_dir: Path | None = None, timeout_seco
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             archive.extractall(dest_dir)
-    except zipfile.BadZipFile:
-        pass
+    except zipfile.BadZipFile as exc:
+        raise ValueError(
+            f"The downloaded update from {info.download_url} was not a valid "
+            f"zip archive ({exc}). This can happen if the download was "
+            "interrupted or corrupted in transit; no files were changed. "
+            "Please try checking for updates again."
+        ) from exc
     return dest_dir
 
 
@@ -274,17 +296,7 @@ def stage_exe_update(info: UpdateInfo, dest_dir: Path | None = None, timeout_sec
 def _escape_batch_path(value: str) -> str:
     """
     Escape a filesystem path for safe embedding inside a Windows batch
-    (.bat) script. Bugfix (v3.1.1): build_apply_batch_script() below
-    previously interpolated raw paths directly into `set "VAR=..."`
-    lines with no escaping at all. Windows batch files treat a
-    percent sign as the start of a variable reference (e.g. `%TEMP%`)
-    even inside a quoted string -- so an installation path containing
-    a literal `%` (a valid filename character on Windows -- e.g. a
-    folder someone named "50% Done" or a username containing one)
-    would have part of the path silently and incorrectly substituted
-    by cmd.exe when the script ran, corrupting the exe-swap step of
-    a self-update. Doubling every `%` (the standard batch escaping
-    rule -- `%%` renders as a single literal `%`) neutralizes this.
+    (.bat) script by doubling every literal percent sign.
     """
     return value.replace("%", "%%")
 

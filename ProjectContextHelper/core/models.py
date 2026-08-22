@@ -84,24 +84,6 @@ class ScanSettings:
         Reconstruct a ScanSettings from a dict produced by
         to_jsonable() -- or any dict of a compatible shape, including
         a hand-edited or partially corrupted one.
-        Defensive coercion (bugfix, v3.1.1): a saved settings file is
-        just JSON on disk, and nothing prevents a user (or a buggy
-        older/future version, or a truncated write) from producing
-        one where a numeric field like "max_file_bytes" ends up as a
-        string, or a set-like field ends up as something that isn't a
-        list of strings. Previously this constructor accepted such a
-        dict as-is, which meant the resulting ScanSettings could
-        contain e.g. max_file_bytes="350000" (str) -- valid at
-        construction time, but guaranteed to raise an unhandled
-        TypeError far later, deep inside scanner.py, the first time
-        that value was compared against a file's integer size. Each
-        known field is now coerced to its expected type, and a field
-        that cannot be coerced is dropped (falling back to that
-        field's dataclass default) rather than propagating a bad
-        value into the rest of the app.
-        Extra/unknown keys are silently ignored, so a settings file
-        saved by a future version with additional fields can still be
-        loaded by an older one.
         """
         data = dict(data)
         for field_name in _SETTINGS_SET_FIELDS:

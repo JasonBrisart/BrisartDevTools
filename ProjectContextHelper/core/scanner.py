@@ -64,15 +64,35 @@ def can_read_text_file(path: Path) -> bool:
 
 
 def exclusion_reason(path: Path, root: Path, settings: ScanSettings) -> str | None:
+    """
+    Bugfix (v3.1.2): directory-name and file-name exclusion matching
+    were case-sensitive (`part in settings.exclude_dirs`, `path.name
+    in settings.exclude_files`), while suffix exclusion two lines
+    below (`suffix = path.suffix.lower()`) was already
+    case-insensitive, and include_extensions matching in
+    is_configured_source_file() below is also already
+    case-insensitive by construction (both sides are pre-lowercased).
+    This was an inconsistency within this same function: on a
+    case-preserving-but-case-insensitive filesystem (the default on
+    Windows, and optionally on macOS), a folder actually named
+    "Build" or "Node_Modules" or "Venv" would silently NOT be excluded
+    by the default "build" / "node_modules" / "venv" entries in
+    DEFAULT_EXCLUDE_DIRS, even though Windows itself treats those
+    names as the same folder. Directory-name and file-name exclusion
+    now compare case-insensitively too, matching how suffix and
+    extension matching already behave.
+    """
     try:
         relative_parts = path.relative_to(root).parts
     except ValueError:
         return SKIP_OUTSIDE_ROOT
     directory_parts = relative_parts if path.is_dir() else relative_parts[:-1]
+    exclude_dirs_lower = {d.lower() for d in settings.exclude_dirs}
+    exclude_files_lower = {f.lower() for f in settings.exclude_files}
     for part in directory_parts:
-        if part in settings.exclude_dirs:
+        if part.lower() in exclude_dirs_lower:
             return f"excluded_directory:{part}"
-    if path.name in settings.exclude_files:
+    if path.name.lower() in exclude_files_lower:
         return f"excluded_file:{path.name}"
     suffix = path.suffix.lower()
     if suffix in settings.exclude_suffixes:
@@ -174,32 +194,12 @@ def collect_included_files(root: Path, settings: ScanSettings) -> ScanResult:
 
 def build_tree(root: Path, settings: ScanSettings) -> str:
     """
-    Build a readable folder tree for the selected project.
-    Bugfix (v3.1.1): this recursive walk previously had no protection
-    against a symlinked directory that (directly or via a longer
-    chain) points back at one of its own ancestors -- a real
-    possibility on any OS that supports symlinks (e.g. a stray
-    `ln -s .. loop` left over from another tool, or a misconfigured
-    build artifact). `collect_included_files()` above is safe from
-    this because `Path.rglob()` does not descend into symlinked
-    directories, but this function walks `directory.iterdir()`
-    manually and did not have the same guard. Verified directly
-    against a real cyclical symlink: rather than a clean failure, the
-    old code silently produced a nonsensical, deeply duplicated tree
-    (the same subdirectory nested inside itself dozens of times) that
-    only stopped because the accumulating path eventually exceeded
-    the OS's path-length limit and `iterdir()` raised an OSError,
-    which was already caught elsewhere in this function -- meaning
-    the corrupted output was returned successfully with no error or
-    warning of any kind. On a filesystem/OS combination with a more
-    generous path-length allowance, the same cycle would instead
-    exhaust Python's call-stack limit and crash the build with a
-    RecursionError. Each directory's resolved (symlink-free) real
-    path is now tracked; if the walk would revisit one already on the
-    current path, that branch is reported directly in the tree as a
-    loop instead of being descended into again -- so the result is
-    correct either way, and the accidental OS-path-length dependency
-    is removed entirely.
+    Build a readable folder tree for the selected project. Protected
+    against symlink loops (a directory that, directly or via a
+    longer chain, points back at one of its own ancestors): each
+    directory's resolved real path is tracked while walking, and
+    revisiting one already on the current path is reported directly
+    in the tree as a loop instead of being descended into again.
     """
     lines: list[str] = [root.name + "/"]
 

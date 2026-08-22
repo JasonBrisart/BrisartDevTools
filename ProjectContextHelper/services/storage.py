@@ -47,34 +47,47 @@ def application_dir() -> Path:
 
 def _atomic_write(path: Path, text: str) -> None:
     """
-    Write `text` to `path` atomically. Bugfix (v3.1.1): every write in
-    this file previously used a plain `path.write_text(...)`, which
-    is not atomic -- if the process is killed, the machine loses
-    power, or disk space runs out at exactly the wrong moment mid-write,
-    the target file is left truncated or partially written. Every
-    loader in this module (load_preferences, load_last_settings,
-    _load_all_profiles, load_history) already treats "file exists but
-    can't be parsed as valid JSON" the same as "no file at all" --
-    which means a truncated custom_profiles.json from an interrupted
-    write would silently look exactly like "no custom profiles were
-    ever saved", permanently and silently losing every profile a user
-    had saved, with no error or warning anywhere.
-    The fix: write to a sibling temporary file first, flush and fsync
-    it to disk, then atomically rename it over the real target with
-    os.replace(). os.replace() is atomic on both POSIX and Windows --
-    at any point before it completes, the original file (if any) is
-    still fully intact; after it completes, the new file is fully
-    intact. There is no window where a reader can observe a partially
-    written file.
+    Write `text` to `path` atomically: write to a sibling temp file,
+    flush and fsync it, then swap it into place with os.replace()
+    (atomic on both POSIX and Windows), so a reader can never observe
+    a partially-written file.
+
+    Bugfix (v3.1.2): if anything went wrong between creating the temp
+    file and the os.replace() call succeeding -- disk full partway
+    through the write, a permissions error, an interrupted fsync, or
+    any other exception -- the temp file was previously left behind
+    on disk forever, with no cleanup attempted. This is more than
+    just clutter: this application_dir() folder is the same folder
+    this very tool is commonly pointed at to export itself (as it
+    plainly is by whoever is running it, given the actual exports
+    already sitting in PROJECT_CONTEXT_EXPORTS/ next to this file) --
+    so a stray ".custom_profiles.json.tmp12345"-style leftover would
+    not match any exact entry in DEFAULT_EXCLUDE_FILES (which only
+    excludes exact, static filenames) and would silently appear in
+    a subsequent export's Skipped File Details table, or worse, get
+    swept in as an actual included source file if its dynamic name
+    happens to end in a configured extension. The write is now
+    wrapped so that any failure attempts to remove its own temp file
+    before the original exception is re-raised, leaving no debris
+    behind on a failed write the way a fully successful or a
+    hard-killed (unrecoverable) write both already effectively do.
     """
     directory = path.parent
     directory.mkdir(parents=True, exist_ok=True)
     temp_path = directory / f".{path.name}.tmp{os.getpid()}"
-    with open(temp_path, "w", encoding="utf-8") as handle:
-        handle.write(text)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temp_path, path)
+    try:
+        with open(temp_path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    except Exception:
+        try:
+            if temp_path.exists():
+                temp_path.unlink()
+        except Exception:
+            pass
+        raise
 
 
 # ============================================================

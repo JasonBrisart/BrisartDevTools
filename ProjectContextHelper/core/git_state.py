@@ -50,7 +50,31 @@ def find_git_dir(root: Path) -> Path | None:
     return None
 
 
+HEADS_REF_PREFIX = "refs/heads/"
+
+
 def read_head_ref(git_dir: Path) -> tuple[str | None, str | None]:
+    """
+    Bugfix (v3.1.2): the previous implementation extracted the branch
+    name by taking only the LAST path segment of the ref
+    (`ref_path.rsplit("/", 1)[-1]`), which is wrong for any branch
+    name that itself contains a slash -- an extremely common,
+    everyday convention (e.g. "feature/login-page",
+    "bugfix/null-check", "release/1.0", "users/jason/experiment").
+    For HEAD content "ref: refs/heads/feature/test", this previously
+    returned "test" instead of "feature/test" -- silently wrong
+    branch name displayed everywhere it's shown to the user, and
+    (far more seriously) resolve_branch_sha() below then looks up
+    `refs/heads/test`, which does not exist, since the real ref file
+    lives at `refs/heads/feature/test`. The practical effect: Git
+    State detection silently failed to resolve a HEAD commit at all
+    (reporting no branch info, no dirty status, nothing) for any
+    checked-out branch whose name contains a slash, with no error or
+    warning indicating why. The branch name is now derived by
+    stripping the known "refs/heads/" prefix instead of guessing at
+    path segments, so the full branch name -- slashes and all -- is
+    preserved correctly.
+    """
     head_path = git_dir / HEAD_FILENAME
     try:
         text = head_path.read_text(encoding="utf-8", errors="replace").strip()
@@ -58,11 +82,49 @@ def read_head_ref(git_dir: Path) -> tuple[str | None, str | None]:
         return None, None
     if text.startswith("ref:"):
         ref_path = text.split(":", 1)[1].strip()
-        branch = ref_path.rsplit("/", 1)[-1] if "/" in ref_path else ref_path
+        if ref_path.startswith(HEADS_REF_PREFIX):
+            branch = ref_path[len(HEADS_REF_PREFIX):]
+        else:
+            # An unusual ref namespace (not a normal local branch) --
+            # fall back to the full ref path rather than guessing at
+            # a single path segment.
+            branch = ref_path
         return branch, None
     if text:
         return None, text
     return None, None
+
+
+def is_valid_sha(value: str) -> bool:
+    """
+    Return True only if `value` looks like a plausible git object id:
+    a non-empty string of pure lowercase/uppercase hex digits, of a
+    length consistent with SHA-1 (40 chars) or a short/abbreviated
+    prefix thereof (this module only ever uses the full 40-char form
+    internally, but validates leniently here since the only caller
+    that needs this check is working with an externally-supplied
+    value -- see resolve_branch_sha()).
+    Bugfix: read_loose_object() builds a filesystem path directly from
+    whatever string it is given (`git_dir / "objects" / sha[:2] / sha[2:]`),
+    with no validation that the string only contains hex digits. A
+    sha-like value pulled from a corrupted or maliciously-crafted
+    packed-refs file (which is a plain, hand-editable text file) could
+    contain path-traversal sequences such as "../../../../etc/passwd"
+    -- since sha[:2] would be ".." and sha[2:] would be
+    "/../../../etc/passwd", and Path silently follows ".." components
+    when joined, the resulting object_path could point completely
+    outside the repository's objects/ directory. In practice this
+    still requires the resolved path to also happen to decompress as
+    valid zlib data to do anything beyond a failed read, so the
+    practical impact is low for a local, single-user tool -- but
+    validating the shape of a sha before ever using it to build a path
+    is the correct, defensive fix regardless, and costs nothing.
+    """
+    if not value:
+        return False
+    if len(value) < 4 or len(value) > 40:
+        return False
+    return all(char in "0123456789abcdefABCDEF" for char in value)
 
 
 def resolve_branch_sha(git_dir: Path, branch: str) -> str | None:
@@ -70,7 +132,7 @@ def resolve_branch_sha(git_dir: Path, branch: str) -> str | None:
     if loose_ref.is_file():
         try:
             sha = loose_ref.read_text(encoding="utf-8", errors="replace").strip()
-            if sha:
+            if sha and is_valid_sha(sha):
                 return sha
         except Exception:
             pass
@@ -84,14 +146,16 @@ def resolve_branch_sha(git_dir: Path, branch: str) -> str | None:
                     continue
                 parts = line.split(" ", 1)
                 if len(parts) == 2 and parts[1].strip() == target_ref:
-                    return parts[0].strip()
+                    candidate_sha = parts[0].strip()
+                    if is_valid_sha(candidate_sha):
+                        return candidate_sha
         except Exception:
             pass
     return None
 
 
 def read_loose_object(git_dir: Path, sha: str) -> tuple[str, bytes] | None:
-    if len(sha) < 3:
+    if not is_valid_sha(sha) or len(sha) < 3:
         return None
     object_path = git_dir / "objects" / sha[:2] / sha[2:]
     if not object_path.is_file():
@@ -129,22 +193,6 @@ def parse_commit_object(content: bytes) -> dict:
 
 
 def parse_tree_object(content: bytes) -> list[tuple[str, str, str]]:
-    """
-    Parse a decompressed tree object. Bugfix (v3.1.1): a corrupted or
-    truncated tree object (e.g. from a partially copied .git folder,
-    or a bit-flip in a very old repository) previously raised an
-    unhandled ValueError here (content.index() finding no match),
-    which propagated all the way out of build_git_state()'s try/except
-    only because that wrapper happens to catch bare Exception -- but
-    it meant a single malformed tree turned the *entire* Git State
-    feature off with a vague "git state detection failed unexpectedly"
-    message instead of degrading gracefully for just that one
-    sub-tree the way a missing/packed object already does elsewhere in
-    this module. Malformed entries are now skipped with the walk
-    continuing for whatever entries *can* be parsed, consistent with
-    how the rest of this module treats "can't fully read this part of
-    history" as a warning, not a hard failure.
-    """
     entries: list[tuple[str, str, str]] = []
     i = 0
     length = len(content)

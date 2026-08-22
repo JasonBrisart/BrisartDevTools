@@ -153,24 +153,6 @@ def apply_custom_profile_to_state(state: GuiState, settings: ScanSettings) -> No
 
 
 def parse_mb_to_bytes(value: str, label: str) -> int:
-    """
-    Bugfix (v3.1.1), two issues fixed together:
-    1. `int(float(value) * 1_000_000)` previously only caught
-       ValueError. Typing an absurdly large number (e.g. "1e400")
-       into a Max File MB / Max Total MB field makes `float(value)`
-       return `inf` (a valid float, no exception raised there), and
-       `int(inf)` then raises OverflowError -- a different exception
-       class the original code did not catch, crashing the GUI
-       instead of showing the intended "must be numeric" message.
-    2. Zero and negative values were previously accepted with no
-       validation. A max size of 0 (or less) makes every real file
-       look "too large" during scanning, silently producing an empty
-       export in `standard` profile or a hard source-completeness
-       failure wall in `archive` profile -- a confusing result with
-       no indication that an unusable size limit was the actual root
-       cause. Both are now rejected with the same clear error used
-       for non-numeric input.
-    """
     try:
         parsed = float(value)
     except ValueError:

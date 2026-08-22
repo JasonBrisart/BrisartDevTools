@@ -59,19 +59,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def settings_from_args(args):
-    """
-    Bugfix (v3.1.1): --max-file-bytes and --max-total-bytes previously
-    accepted any integer with no lower-bound check, including zero or
-    negative values. A non-positive max_file_bytes makes every single
-    scanned file look "too large" (since any real file's size is
-    greater than zero or a negative number), silently producing an
-    empty export in `standard` profile, or a hard "SOURCE COMPLETENESS
-    CHECK FAILED" wall of every eligible file in `archive` profile --
-    either way, a confusing result with no indication that the root
-    cause was simply an unusable size limit. Both are now rejected
-    with a clear, immediate error instead of silently producing a
-    broken scan.
-    """
     settings = settings_for_profile(args.profile)
     if args.use_last_settings:
         remembered = storage.load_last_settings()
@@ -129,6 +116,20 @@ def settings_from_args(args):
 
 
 def run_update_check(open_page_when_available: bool = False, install: bool = False) -> None:
+    """
+    Bugfix (v3.1.2): the download/apply steps below had no exception
+    handling at all, unlike the equivalent GUI flow in
+    gui/about_tab.py (which already wraps its own call to
+    download_update() in a try/except) and unlike this file's main
+    build flow (already wrapped in v3.1.1). A corrupted download (see
+    the new exception download_update() can now raise for a
+    BadZipFile), a checksum mismatch from verify_digest(), or a
+    filesystem error while backing up/copying files during
+    apply_staged_update()/apply_exe_update() would previously crash
+    this command with a raw Python traceback instead of the same
+    clean "Update failed: ..." style message every other error path
+    in this file already uses.
+    """
     info = check_for_updates()
     print(f"{APP_NAME} v{APP_VERSION}")
     print()
@@ -142,24 +143,30 @@ def run_update_check(open_page_when_available: bool = False, install: bool = Fal
         if open_page_when_available:
             open_releases_page(info.release_url)
         return
-    if info.asset_kind == "exe":
+    try:
+        if info.asset_kind == "exe":
+            print()
+            print(f"Downloading update {info.latest_version} (compiled executable)...")
+            staged_path = stage_exe_update(info)
+            print(f"Staged and checksum-verified at: {staged_path}")
+            print("Backing up current executable and applying update...")
+            apply_exe_update(staged_path, current_version=APP_VERSION)
+            print("Update applied. This process will now exit so the new executable can be swapped into place; it will relaunch automatically in a few seconds.")
+            sys.exit(0)
         print()
-        print(f"Downloading update {info.latest_version} (compiled executable)...")
-        staged_path = stage_exe_update(info)
-        print(f"Staged and checksum-verified at: {staged_path}")
-        print("Backing up current executable and applying update...")
-        apply_exe_update(staged_path, current_version=APP_VERSION)
-        print("Update applied. This process will now exit so the new executable can be swapped into place; it will relaunch automatically in a few seconds.")
-        sys.exit(0)
-    print()
-    print(f"Downloading update {info.latest_version}...")
-    staged_dir = download_update(info)
-    print(f"Staged in: {staged_dir}")
-    print("Backing up current files and applying update...")
-    result = apply_staged_update(staged_dir)
-    print(f"Backup written to: {result.backup_dir}")
-    print(f"Files updated: {len(result.applied_files)}")
-    print("Restart the application to run the new version.")
+        print(f"Downloading update {info.latest_version}...")
+        staged_dir = download_update(info)
+        print(f"Staged in: {staged_dir}")
+        print("Backing up current files and applying update...")
+        result = apply_staged_update(staged_dir)
+        print(f"Backup written to: {result.backup_dir}")
+        print(f"Files updated: {len(result.applied_files)}")
+        print("Restart the application to run the new version.")
+    except SystemExit:
+        raise
+    except Exception as exc:
+        print(f"Update failed: {exc}")
+        sys.exit(1)
 
 
 def run_profile_list() -> None:
@@ -185,21 +192,6 @@ def run_profile_delete(name: str) -> None:
 
 
 def run_cli() -> None:
-    """
-    Bugfix (v3.1.1): building settings and running a build previously
-    had no error handling in this function at all. A nonexistent
-    project folder (validate_root() raises FileNotFoundError /
-    NotADirectoryError), an archive-mode source completeness failure
-    (collect_included_files() raises ValueError), or an invalid
-    --max-file-bytes/--max-total-bytes value (see settings_from_args()
-    above) would previously crash the whole CLI with a raw Python
-    traceback -- confusing and inconsistent with every other error
-    path in this file, which prints a clean message instead. The
-    build is now wrapped so these expected, already-descriptive
-    exceptions are printed cleanly and exit with a nonzero status,
-    the same way a shell script or CI pipeline calling this tool
-    would expect a real failure to be reported.
-    """
     parser = build_parser()
     args = parser.parse_args()
 

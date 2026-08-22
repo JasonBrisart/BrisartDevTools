@@ -29,23 +29,34 @@ from core.utils import (
 def escape_table_cell(value: str) -> str:
     """
     Escape a value for safe placement inside a Markdown pipe-table
-    cell. Bugfix (v3.1.1): every table this module builds (File
-    Index, Skipped File Details, Source Completeness failures) puts
-    raw file paths and skip-reason strings directly between `|`
-    delimiters with no escaping at all. A pipe character in a
-    filename -- perfectly valid on Linux and macOS filesystems (e.g.
-    "notes|draft.txt") -- would previously terminate the cell early
-    and corrupt every column after it for that row, silently making
-    the rendered table wrong (shifted columns, or extra broken rows)
-    with no error or warning anywhere in the output. A literal
-    newline in a path (also valid on Linux) would similarly break a
-    row across multiple lines. Both are now escaped: `|` becomes
-    `\\|` (an escaped pipe, which every Markdown table renderer
-    treats as literal text instead of a column boundary) and any
-    newline is replaced with a visible space so a single logical
-    table row can never be split across rendered lines.
+    cell, AND/OR inside a single-backtick inline code span (every
+    call site in this module does one or both of these immediately
+    after calling this function).
+    Bugfix (v3.1.2): this function already escaped `|` (pipe) and
+    collapsed embedded newlines, but did not escape backticks. Every
+    call site wraps its result in a single pair of backticks
+    (e.g. f"`{path_cell}`") to render it as inline code -- but if the
+    original value itself contains a literal backtick (a valid
+    filename character on Linux/macOS, e.g. "weird`file.py", and also
+    a completely ordinary character to find inside a real git commit
+    message, e.g. "Fix `foo()` bug"), that backtick prematurely closes
+    the intended code span. Everything between the embedded backtick
+    and the next backtick in the line renders as literal, unescaped
+    Markdown instead of inert code text -- which, worse, undoes the
+    protection this function was already providing against pipe
+    characters, since a pipe that escapes the (now prematurely closed)
+    code span is no longer inside a context where `\\|` reads as
+    intended. Backticks are replaced with a single quote, consistent
+    with this function's existing philosophy of prioritizing rendered
+    output correctness over perfect character fidelity for values
+    that were always going to be adversarial edge cases anyway.
     """
-    return value.replace("|", "\\|").replace("\n", " ").replace("\r", "")
+    return (
+        value.replace("`", "'")
+        .replace("|", "\\|")
+        .replace("\n", " ")
+        .replace("\r", "")
+    )
 
 
 def source_completeness_report(scan: ScanResult, settings: ScanSettings) -> dict:
@@ -68,6 +79,18 @@ def git_state_report(git_state: GitState | None) -> dict | None:
 
 
 def append_git_state_markdown(chunks: list[str], git_state: GitState | None) -> None:
+    """
+    Bugfix (v3.1.2): the modified/untracked file paths and recent
+    commit summaries rendered here were previously placed directly
+    inside single backticks with NO escaping at all (unlike every
+    table in this module, which at least escaped pipes/newlines even
+    before this fix). A commit subject line containing a backtick --
+    an extremely common, completely ordinary thing to find in a real
+    commit message (e.g. "Fix `foo()` bug") -- would break the
+    rendered bullet list. Both are now passed through
+    escape_table_cell(), consistent with everywhere else in this
+    module that wraps a value in backticks.
+    """
     chunks.append("## Git State")
     chunks.append("")
     if git_state is None:
@@ -95,19 +118,19 @@ def append_git_state_markdown(chunks: list[str], git_state: GitState | None) -> 
             chunks.append("**Modified or deleted since HEAD:**")
             chunks.append("")
             for path in git_state.modified_files:
-                chunks.append(f"- `{path}`")
+                chunks.append(f"- `{escape_table_cell(path)}`")
             chunks.append("")
         if git_state.untracked_files:
             chunks.append("**Untracked:**")
             chunks.append("")
             for path in git_state.untracked_files:
-                chunks.append(f"- `{path}`")
+                chunks.append(f"- `{escape_table_cell(path)}`")
             chunks.append("")
     if git_state.recent_commits:
         chunks.append("**Recent commits (HEAD first):**")
         chunks.append("")
         for commit_line in git_state.recent_commits:
-            chunks.append(f"- `{commit_line}`")
+            chunks.append(f"- `{escape_table_cell(commit_line)}`")
         chunks.append("")
     if git_state.warnings:
         chunks.append("> **Note:** git state detection was only partially possible for this repository:")
