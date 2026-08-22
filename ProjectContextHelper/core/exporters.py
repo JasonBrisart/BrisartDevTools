@@ -26,6 +26,28 @@ from core.utils import (
 )
 
 
+def escape_table_cell(value: str) -> str:
+    """
+    Escape a value for safe placement inside a Markdown pipe-table
+    cell. Bugfix (v3.1.1): every table this module builds (File
+    Index, Skipped File Details, Source Completeness failures) puts
+    raw file paths and skip-reason strings directly between `|`
+    delimiters with no escaping at all. A pipe character in a
+    filename -- perfectly valid on Linux and macOS filesystems (e.g.
+    "notes|draft.txt") -- would previously terminate the cell early
+    and corrupt every column after it for that row, silently making
+    the rendered table wrong (shifted columns, or extra broken rows)
+    with no error or warning anywhere in the output. A literal
+    newline in a path (also valid on Linux) would similarly break a
+    row across multiple lines. Both are now escaped: `|` becomes
+    `\\|` (an escaped pipe, which every Markdown table renderer
+    treats as literal text instead of a column boundary) and any
+    newline is replaced with a visible space so a single logical
+    table row can never be split across rendered lines.
+    """
+    return value.replace("|", "\\|").replace("\n", " ").replace("\r", "")
+
+
 def source_completeness_report(scan: ScanResult, settings: ScanSettings) -> dict:
     failures = [r for r in scan.skipped_records if r.reason in SOURCE_COMPLETENESS_FAILURE_REASONS]
     included_count = len(scan.included_records)
@@ -127,7 +149,9 @@ def append_source_completeness_markdown(chunks: list[str], scan: ScanResult, set
     for failure in report["failures"]:
         size = failure.get("size_bytes")
         size_display = "" if size is None else str(size)
-        chunks.append(f"| `{failure['relative_path']}` | `{failure['reason']}` | {size_display} |")
+        path_cell = escape_table_cell(failure['relative_path'])
+        reason_cell = escape_table_cell(failure['reason'])
+        chunks.append(f"| `{path_cell}` | `{reason_cell}` | {size_display} |")
     chunks.append("")
 
 
@@ -163,7 +187,7 @@ def build_context_markdown(root: Path, scan: ScanResult, settings: ScanSettings,
         chunks.append("## Skip Reason Summary")
         chunks.append("")
         for reason, count in sorted(skip_counts.items()):
-            chunks.append(f"- `{reason}`: {count}")
+            chunks.append(f"- `{escape_table_cell(reason)}`: {count}")
         chunks.append("")
     if settings.include_skipped_details and scan.skipped_records:
         chunks.append("## Skipped File Details")
@@ -174,7 +198,9 @@ def build_context_markdown(root: Path, scan: ScanResult, settings: ScanSettings,
         chunks.append("|---|---|---:|")
         for record in visible_records:
             size_display = "" if record.size_bytes is None else str(record.size_bytes)
-            chunks.append(f"| `{record.relative_path}` | `{record.reason}` | {size_display} |")
+            path_cell = escape_table_cell(record.relative_path)
+            reason_cell = escape_table_cell(record.reason)
+            chunks.append(f"| `{path_cell}` | `{reason_cell}` | {size_display} |")
         remaining = len(scan.skipped_records) - len(visible_records)
         if remaining > 0:
             chunks.append("")
@@ -200,7 +226,8 @@ def build_context_markdown(root: Path, scan: ScanResult, settings: ScanSettings,
             alignment = ["---:" if h in {"Bytes", "Lines"} else "---" for h in headers]
             chunks.append("| " + " | ".join(alignment) + " |")
             for record in scan.included_records:
-                cells = [f"`{record.relative_path}`", str(record.size_bytes)]
+                path_cell = escape_table_cell(record.relative_path)
+                cells = [f"`{path_cell}`", str(record.size_bytes)]
                 if settings.include_line_counts:
                     cells.append("" if record.line_count is None else str(record.line_count))
                 if settings.include_hashes:

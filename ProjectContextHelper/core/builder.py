@@ -32,11 +32,6 @@ from core.utils import (
 
 
 def create_context(root: Path, settings: ScanSettings | None = None) -> BuildResult:
-    """
-    Note: build history is recorded via services.storage.append_history_entry()
-    -- the single consolidated storage module -- not a dedicated
-    services/history.py module (removed; see services/storage.py).
-    """
     root = validate_root(root)
     settings = settings or ScanSettings()
     created = timestamp_now()

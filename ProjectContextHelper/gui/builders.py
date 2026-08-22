@@ -62,10 +62,6 @@ def make_bool_var(value: bool) -> tk.BooleanVar:
 
 
 def wire_preference_autosave(state: GuiState) -> None:
-    """
-    Persists via services.storage.save_preferences() -- the single
-    consolidated storage module -- immediately on every change.
-    """
     def persist(*_args) -> None:
         save_preferences(
             AppPreferences(
@@ -80,12 +76,6 @@ def wire_preference_autosave(state: GuiState) -> None:
 
 
 def make_gui_state() -> GuiState:
-    """
-    The previously-saved settings from the most recent successful
-    build are ALWAYS loaded here, unconditionally, via
-    services.storage.load_last_settings(), in place of the selected
-    profile's plain defaults.
-    """
     settings = settings_for_profile(DEFAULT_PROFILE)
     preferences = load_preferences()
     remembered_settings = load_last_settings()
@@ -163,10 +153,37 @@ def apply_custom_profile_to_state(state: GuiState, settings: ScanSettings) -> No
 
 
 def parse_mb_to_bytes(value: str, label: str) -> int:
+    """
+    Bugfix (v3.1.1), two issues fixed together:
+    1. `int(float(value) * 1_000_000)` previously only caught
+       ValueError. Typing an absurdly large number (e.g. "1e400")
+       into a Max File MB / Max Total MB field makes `float(value)`
+       return `inf` (a valid float, no exception raised there), and
+       `int(inf)` then raises OverflowError -- a different exception
+       class the original code did not catch, crashing the GUI
+       instead of showing the intended "must be numeric" message.
+    2. Zero and negative values were previously accepted with no
+       validation. A max size of 0 (or less) makes every real file
+       look "too large" during scanning, silently producing an empty
+       export in `standard` profile or a hard source-completeness
+       failure wall in `archive` profile -- a confusing result with
+       no indication that an unusable size limit was the actual root
+       cause. Both are now rejected with the same clear error used
+       for non-numeric input.
+    """
     try:
-        return int(float(value) * 1_000_000)
+        parsed = float(value)
     except ValueError:
         raise ValueError(f"{label} must be numeric.")
+    if parsed != parsed or parsed in (float("inf"), float("-inf")):
+        raise ValueError(f"{label} must be a finite number.")
+    try:
+        result = int(parsed * 1_000_000)
+    except (ValueError, OverflowError):
+        raise ValueError(f"{label} must be numeric.")
+    if result <= 0:
+        raise ValueError(f"{label} must be greater than zero.")
+    return result
 
 
 def parse_nonnegative_int(value: str, label: str) -> int:
@@ -196,11 +213,6 @@ def build_settings_from_state(state: GuiState) -> ScanSettings:
 
 
 def run_project_build(state: GuiState) -> BuildResult:
-    """
-    Settings are always remembered via services.storage.save_last_settings()
-    after every successful build -- the single consolidated storage
-    module -- unconditionally, with no toggle to disable it.
-    """
     folder = state.selected_folder.get().strip()
     if not folder:
         raise ValueError("Please select a project folder first.")

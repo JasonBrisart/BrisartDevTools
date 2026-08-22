@@ -3,29 +3,9 @@ Storage
 Single consolidated module for every piece of persisted application
 state that is not part of a build's own output files.
 
-Before this module existed, this same functionality was spread across
-four separate files:
-  - services/app_settings.py    -- AppPreferences        (app_settings.json)
-  - services/settings_memory.py -- always-on last-used   (last_export_settings.json)
-  - services/profile_manager.py -- named Custom Profiles (custom_profiles.json)
-  - services/history.py         -- build history          (build_history.json)
-Each of those four files had its own near-identical application_dir()
-helper, independently re-implementing the same frozen-vs-source
-resolution logic. That duplication is exactly the kind of thing that
-lets small inconsistencies creep in over time. All four are now gone;
-everything below lives in this one file instead.
-
-Every other module in this app that needs to read or write any of
-this state (core/builder.py, cli/cli.py, gui/builders.py,
-gui/profiles_section.py, gui/about_tab.py) imports directly from
-services.storage and nowhere else. No module outside this file
-performs its own file I/O against app_settings.json,
-last_export_settings.json, custom_profiles.json, or
-build_history.json.
-
 Sections in this file, each self-contained but sharing the same
-application_dir() helper:
-  1. Shared application_dir() helper
+application_dir() helper and the same atomic-write helper:
+  1. Shared application_dir() / _atomic_write() helpers
   2. App Preferences      (app_settings.json)
   3. Last Used Settings   (last_export_settings.json) -- always-on GUI memory
   4. Custom Profiles      (custom_profiles.json)       -- named, explicit Save/Load/Delete
@@ -37,6 +17,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 import json
+import os
 import sys
 
 from core.constants import (
@@ -52,31 +33,52 @@ from core.models import ScanSettings
 
 
 # ============================================================
-# 1. Shared application_dir() helper
+# 1. Shared application_dir() / _atomic_write() helpers
 # ============================================================
 def application_dir() -> Path:
     """
     Return the application's root folder (the one containing run.py),
     not the services/ folder this module itself lives in.
-    When frozen (PyInstaller), this is the folder containing the
-    compiled .exe. When running from source, this module sits at
-    <app_root>/services/storage.py, so the app root is one level
-    above this file's own parent directory.
-    This is the single implementation of this resolution logic used
-    by every kind of persisted state in this file -- previously each
-    of the four modules this file replaces had its own copy of this
-    exact function.
     """
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent.parent
 
 
+def _atomic_write(path: Path, text: str) -> None:
+    """
+    Write `text` to `path` atomically. Bugfix (v3.1.1): every write in
+    this file previously used a plain `path.write_text(...)`, which
+    is not atomic -- if the process is killed, the machine loses
+    power, or disk space runs out at exactly the wrong moment mid-write,
+    the target file is left truncated or partially written. Every
+    loader in this module (load_preferences, load_last_settings,
+    _load_all_profiles, load_history) already treats "file exists but
+    can't be parsed as valid JSON" the same as "no file at all" --
+    which means a truncated custom_profiles.json from an interrupted
+    write would silently look exactly like "no custom profiles were
+    ever saved", permanently and silently losing every profile a user
+    had saved, with no error or warning anywhere.
+    The fix: write to a sibling temporary file first, flush and fsync
+    it to disk, then atomically rename it over the real target with
+    os.replace(). os.replace() is atomic on both POSIX and Windows --
+    at any point before it completes, the original file (if any) is
+    still fully intact; after it completes, the new file is fully
+    intact. There is no window where a reader can observe a partially
+    written file.
+    """
+    directory = path.parent
+    directory.mkdir(parents=True, exist_ok=True)
+    temp_path = directory / f".{path.name}.tmp{os.getpid()}"
+    with open(temp_path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temp_path, path)
+
+
 # ============================================================
 # 2. App Preferences (app_settings.json)
-# Remaining user-controlled GUI preference toggles: open export
-# folder after build, check for updates on startup, auto-install
-# downloaded updates.
 # ============================================================
 @dataclass(slots=True)
 class AppPreferences:
@@ -107,19 +109,14 @@ def load_preferences(app_dir: Path | None = None) -> AppPreferences:
 
 def save_preferences(preferences: AppPreferences, app_dir: Path | None = None) -> None:
     path = app_settings_path(app_dir)
-    path.write_text(json.dumps(asdict(preferences), indent=2), encoding="utf-8")
+    try:
+        _atomic_write(path, json.dumps(asdict(preferences), indent=2))
+    except Exception:
+        pass
 
 
 # ============================================================
 # 3. Last Used Settings (last_export_settings.json)
-# Always-on GUI behavior: every successful GUI build silently saves
-# the settings used, and every GUI launch silently loads them back in
-# place of the selected profile's plain defaults. No toggle exists
-# for this in the GUI. The CLI's --remember-settings/--use-last-settings
-# flags read/write this same file but remain explicit opt-in, since
-# CLI invocations are typically scripted and expected to stay
-# deterministic unless a user explicitly asks otherwise.
-# Distinct from Custom Profiles below (named, multi-slot, explicit).
 # ============================================================
 def last_settings_path(app_dir: Path | None = None) -> Path:
     return (app_dir or application_dir()) / LAST_SETTINGS_FILENAME
@@ -133,7 +130,7 @@ def save_last_settings(settings: ScanSettings, app_dir: Path | None = None) -> N
     """
     try:
         path = last_settings_path(app_dir)
-        path.write_text(json.dumps(settings.to_jsonable(), indent=2), encoding="utf-8")
+        _atomic_write(path, json.dumps(settings.to_jsonable(), indent=2))
     except Exception:
         pass
 
@@ -158,11 +155,6 @@ def load_last_settings(app_dir: Path | None = None) -> ScanSettings | None:
 
 
 def clear_last_settings(app_dir: Path | None = None) -> None:
-    """
-    Remove any saved settings memory. Not called automatically by the
-    GUI (there's no toggle to turn off); kept available for
-    scripting/manual use.
-    """
     path = last_settings_path(app_dir)
     try:
         if path.exists():
@@ -173,10 +165,6 @@ def clear_last_settings(app_dir: Path | None = None) -> None:
 
 # ============================================================
 # 4. Custom Profiles (custom_profiles.json)
-# Named, user-managed settings profiles with explicit Save / Load /
-# Delete actions. Distinct from the two built-in presets ("standard",
-# "archive" -- reserved names, can't be used for a custom profile)
-# and from the automatic, unnamed Last Used Settings above.
 # ============================================================
 RESERVED_PROFILE_NAMES = {PROFILE_STANDARD, PROFILE_ARCHIVE}
 
@@ -205,7 +193,7 @@ def _load_all_profiles(app_dir: Path | None = None) -> dict[str, dict]:
 
 def _save_all_profiles(profiles: dict[str, dict], app_dir: Path | None = None) -> None:
     path = profiles_path(app_dir)
-    path.write_text(json.dumps({"profiles": profiles}, indent=2), encoding="utf-8")
+    _atomic_write(path, json.dumps({"profiles": profiles}, indent=2))
 
 
 def list_profiles(app_dir: Path | None = None) -> list[str]:
@@ -213,11 +201,6 @@ def list_profiles(app_dir: Path | None = None) -> list[str]:
 
 
 def profile_exists(name: str, app_dir: Path | None = None) -> bool:
-    """
-    Strips `name` before lookup, matching save_profile()'s behavior
-    of always storing a stripped key, so a name with incidental
-    leading/trailing whitespace still resolves to the same profile.
-    """
     return name.strip() in _load_all_profiles(app_dir)
 
 
@@ -233,9 +216,6 @@ def save_profile(name: str, settings: ScanSettings, app_dir: Path | None = None)
 
 
 def load_profile(name: str, app_dir: Path | None = None) -> ScanSettings | None:
-    """
-    Strips `name` before lookup (see profile_exists() above for why).
-    """
     raw = _load_all_profiles(app_dir).get(name.strip())
     if raw is None:
         return None
@@ -246,9 +226,6 @@ def load_profile(name: str, app_dir: Path | None = None) -> ScanSettings | None:
 
 
 def delete_profile(name: str, app_dir: Path | None = None) -> bool:
-    """
-    Strips `name` before lookup (see profile_exists() above for why).
-    """
     name = name.strip()
     profiles = _load_all_profiles(app_dir)
     if name not in profiles:
@@ -260,8 +237,6 @@ def delete_profile(name: str, app_dir: Path | None = None) -> bool:
 
 # ============================================================
 # 5. Build History (build_history.json)
-# Lightweight local record of completed builds, shown as the Recent
-# Exports list on the About tab.
 # ============================================================
 @dataclass(frozen=True, slots=True)
 class HistoryEntry:
@@ -299,7 +274,7 @@ def load_history(app_dir: Path | None = None) -> list[HistoryEntry]:
 
 def save_history(entries: list[HistoryEntry], app_dir: Path | None = None) -> None:
     path = history_path(app_dir)
-    path.write_text(json.dumps([asdict(e) for e in entries], indent=2), encoding="utf-8")
+    _atomic_write(path, json.dumps([asdict(e) for e in entries], indent=2))
 
 
 def append_history_entry(entry: HistoryEntry, app_dir: Path | None = None) -> list[HistoryEntry]:

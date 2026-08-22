@@ -20,11 +20,6 @@ def create_custom_profiles_section(
     parent: tk.Frame,
     state: GuiState,
 ) -> None:
-    """
-    Every Save / Load / Delete / list action here goes exclusively
-    through services.storage -- the single consolidated storage
-    module. No file I/O happens in this module directly.
-    """
     frame = tk.LabelFrame(parent, text="Custom Profiles", padx=12, pady=12)
     frame.pack(fill="x", padx=16, pady=(8, 16))
     intro = tk.Label(

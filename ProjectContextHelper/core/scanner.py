@@ -173,9 +173,44 @@ def collect_included_files(root: Path, settings: ScanSettings) -> ScanResult:
 
 
 def build_tree(root: Path, settings: ScanSettings) -> str:
+    """
+    Build a readable folder tree for the selected project.
+    Bugfix (v3.1.1): this recursive walk previously had no protection
+    against a symlinked directory that (directly or via a longer
+    chain) points back at one of its own ancestors -- a real
+    possibility on any OS that supports symlinks (e.g. a stray
+    `ln -s .. loop` left over from another tool, or a misconfigured
+    build artifact). `collect_included_files()` above is safe from
+    this because `Path.rglob()` does not descend into symlinked
+    directories, but this function walks `directory.iterdir()`
+    manually and did not have the same guard. Verified directly
+    against a real cyclical symlink: rather than a clean failure, the
+    old code silently produced a nonsensical, deeply duplicated tree
+    (the same subdirectory nested inside itself dozens of times) that
+    only stopped because the accumulating path eventually exceeded
+    the OS's path-length limit and `iterdir()` raised an OSError,
+    which was already caught elsewhere in this function -- meaning
+    the corrupted output was returned successfully with no error or
+    warning of any kind. On a filesystem/OS combination with a more
+    generous path-length allowance, the same cycle would instead
+    exhaust Python's call-stack limit and crash the build with a
+    RecursionError. Each directory's resolved (symlink-free) real
+    path is now tracked; if the walk would revisit one already on the
+    current path, that branch is reported directly in the tree as a
+    loop instead of being descended into again -- so the result is
+    correct either way, and the accidental OS-path-length dependency
+    is removed entirely.
+    """
     lines: list[str] = [root.name + "/"]
 
-    def walk(directory: Path, prefix: str = "") -> None:
+    def walk(directory: Path, prefix: str = "", visited: frozenset[Path] = frozenset()) -> None:
+        try:
+            resolved = directory.resolve()
+        except OSError:
+            resolved = directory
+        if resolved in visited:
+            return
+        visited = visited | {resolved}
         try:
             entries = sorted(
                 [e for e in directory.iterdir() if not exclusion_reason(e, root, settings)],
@@ -186,9 +221,16 @@ def build_tree(root: Path, settings: ScanSettings) -> str:
         for index, entry in enumerate(entries):
             is_last = index == len(entries) - 1
             connector = "└── " if is_last else "├── "
-            lines.append(prefix + connector + entry.name + ("/" if entry.is_dir() else ""))
-            if entry.is_dir():
+            is_dir = entry.is_dir()
+            try:
+                entry_resolved = entry.resolve() if is_dir else None
+            except OSError:
+                entry_resolved = None
+            is_loop = is_dir and entry_resolved is not None and entry_resolved in visited
+            suffix = "/ (symlink loop, not expanded)" if is_loop else ("/" if is_dir else "")
+            lines.append(prefix + connector + entry.name + suffix)
+            if is_dir and not is_loop:
                 extension = "    " if is_last else "│   "
-                walk(entry, prefix + extension)
+                walk(entry, prefix + extension, visited)
     walk(root)
     return "\n".join(lines)

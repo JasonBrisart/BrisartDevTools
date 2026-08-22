@@ -34,12 +34,6 @@ from services.updater import (
 
 
 def create_about_tab(parent: tk.Frame, window: tk.Tk, state: GuiState):
-    """
-    Recent Exports history (HistoryEntry, clear_history, recent_entries)
-    and application_dir() are both imported from services.storage --
-    the single consolidated storage module -- not a dedicated
-    services/history.py module.
-    """
     about_text = tk.Label(
         parent, justify="left", anchor="nw", wraplength=760,
         text=(

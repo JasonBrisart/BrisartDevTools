@@ -14,6 +14,36 @@ _SETTINGS_SET_FIELDS = (
     "exclude_suffixes",
 )
 
+# Fields that must be coerced to a specific type when loading from a
+# saved JSON dict (custom_profiles.json / last_export_settings.json /
+# a PROJECT_CONTEXT_SETTINGS.json a user hand-edited or that was
+# corrupted/truncated). Without this, a wrong type surviving into a
+# ScanSettings (e.g. max_file_bytes loaded as the string "350000"
+# instead of the int 350000) would not fail here -- it would fail
+# much later and far less clearly, as an unhandled TypeError deep
+# inside scanner.py's `meta.size_bytes > settings.max_file_bytes`
+# comparison, crashing the entire build with a confusing traceback
+# instead of a clean fallback.
+_SETTINGS_INT_FIELDS = (
+    "max_file_bytes",
+    "max_total_bytes",
+    "skipped_details_limit",
+    "git_state_commit_limit",
+)
+_SETTINGS_BOOL_FIELDS = (
+    "include_snapshot_zip",
+    "redact_sensitive_lines",
+    "include_hashes",
+    "include_line_counts",
+    "include_folder_tree",
+    "include_file_index",
+    "include_file_contents",
+    "include_skipped_details",
+    "timestamped_export_folder",
+    "require_complete_source",
+    "include_git_state",
+)
+
 
 @dataclass(slots=True)
 class ScanSettings:
@@ -50,10 +80,59 @@ class ScanSettings:
 
     @classmethod
     def from_jsonable(cls, data: dict[str, Any]) -> "ScanSettings":
+        """
+        Reconstruct a ScanSettings from a dict produced by
+        to_jsonable() -- or any dict of a compatible shape, including
+        a hand-edited or partially corrupted one.
+        Defensive coercion (bugfix, v3.1.1): a saved settings file is
+        just JSON on disk, and nothing prevents a user (or a buggy
+        older/future version, or a truncated write) from producing
+        one where a numeric field like "max_file_bytes" ends up as a
+        string, or a set-like field ends up as something that isn't a
+        list of strings. Previously this constructor accepted such a
+        dict as-is, which meant the resulting ScanSettings could
+        contain e.g. max_file_bytes="350000" (str) -- valid at
+        construction time, but guaranteed to raise an unhandled
+        TypeError far later, deep inside scanner.py, the first time
+        that value was compared against a file's integer size. Each
+        known field is now coerced to its expected type, and a field
+        that cannot be coerced is dropped (falling back to that
+        field's dataclass default) rather than propagating a bad
+        value into the rest of the app.
+        Extra/unknown keys are silently ignored, so a settings file
+        saved by a future version with additional fields can still be
+        loaded by an older one.
+        """
         data = dict(data)
         for field_name in _SETTINGS_SET_FIELDS:
             if field_name in data:
-                data[field_name] = set(data[field_name])
+                raw_value = data[field_name]
+                if isinstance(raw_value, (list, tuple, set)):
+                    data[field_name] = {
+                        item for item in raw_value if isinstance(item, str)
+                    }
+                else:
+                    del data[field_name]
+        for field_name in _SETTINGS_INT_FIELDS:
+            if field_name in data:
+                raw_value = data[field_name]
+                if isinstance(raw_value, bool):
+                    del data[field_name]
+                elif isinstance(raw_value, int):
+                    pass
+                elif isinstance(raw_value, float) and raw_value.is_integer():
+                    data[field_name] = int(raw_value)
+                elif isinstance(raw_value, str) and raw_value.strip().lstrip("-").isdigit():
+                    data[field_name] = int(raw_value.strip())
+                else:
+                    del data[field_name]
+        for field_name in _SETTINGS_BOOL_FIELDS:
+            if field_name in data and not isinstance(data[field_name], bool):
+                del data[field_name]
+        if "profile" in data and not isinstance(data["profile"], str):
+            del data["profile"]
+        if "output_dir_name" in data and not isinstance(data["output_dir_name"], str):
+            del data["output_dir_name"]
         valid_fields = {
             field_obj.name for field_obj in cls.__dataclass_fields__.values()
         }

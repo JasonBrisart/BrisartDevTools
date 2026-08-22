@@ -30,14 +30,6 @@ PROTECTED_NAMES = {UPDATES_DIRNAME, EXPORTS_DIRNAME, "__pycache__", ".git", "dow
 
 
 def is_frozen() -> bool:
-    """
-    Kept here (rather than only in services.storage) since this
-    module's own update-staging logic branches on frozen-vs-source
-    mode in several places beyond just resolving a folder path.
-    application_dir() itself is now imported directly from
-    services.storage -- the single shared implementation -- instead
-    of duplicating it here.
-    """
     return bool(getattr(sys, "frozen", False))
 
 
@@ -279,11 +271,31 @@ def stage_exe_update(info: UpdateInfo, dest_dir: Path | None = None, timeout_sec
     return staged_path
 
 
+def _escape_batch_path(value: str) -> str:
+    """
+    Escape a filesystem path for safe embedding inside a Windows batch
+    (.bat) script. Bugfix (v3.1.1): build_apply_batch_script() below
+    previously interpolated raw paths directly into `set "VAR=..."`
+    lines with no escaping at all. Windows batch files treat a
+    percent sign as the start of a variable reference (e.g. `%TEMP%`)
+    even inside a quoted string -- so an installation path containing
+    a literal `%` (a valid filename character on Windows -- e.g. a
+    folder someone named "50% Done" or a username containing one)
+    would have part of the path silently and incorrectly substituted
+    by cmd.exe when the script ran, corrupting the exe-swap step of
+    a self-update. Doubling every `%` (the standard batch escaping
+    rule -- `%%` renders as a single literal `%`) neutralizes this.
+    """
+    return value.replace("%", "%%")
+
+
 def build_apply_batch_script(new_exe_path: Path, target_exe_path: Path, relaunch: bool = True) -> Path:
     relaunch_flag = "1" if relaunch else "0"
+    new_exe_str = _escape_batch_path(str(new_exe_path))
+    target_exe_str = _escape_batch_path(str(target_exe_path))
     script_lines = [
         "@echo off", "setlocal EnableDelayedExpansion",
-        f'set "NEWEXE={new_exe_path}"', f'set "TARGET={target_exe_path}"', f'set "RELAUNCH={relaunch_flag}"',
+        f'set "NEWEXE={new_exe_str}"', f'set "TARGET={target_exe_str}"', f'set "RELAUNCH={relaunch_flag}"',
         "set /a attempts=0", ":retry", "set /a attempts+=1", 'del /f /q "%TARGET%" 2>nul',
         'if exist "%TARGET%" (', "    if !attempts! LSS 20 (", "        timeout /t 1 /nobreak >nul",
         "        goto retry", "    ) else (", "        exit /b 1", "    )", ")",

@@ -60,10 +60,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 def settings_from_args(args):
     """
-    All settings persistence here (--use-last-settings,
-    --remember-settings, --load-profile, --save-profile,
-    --delete-profile, --list-profiles) goes exclusively through
-    services.storage -- the single consolidated storage module.
+    Bugfix (v3.1.1): --max-file-bytes and --max-total-bytes previously
+    accepted any integer with no lower-bound check, including zero or
+    negative values. A non-positive max_file_bytes makes every single
+    scanned file look "too large" (since any real file's size is
+    greater than zero or a negative number), silently producing an
+    empty export in `standard` profile, or a hard "SOURCE COMPLETENESS
+    CHECK FAILED" wall of every eligible file in `archive` profile --
+    either way, a confusing result with no indication that the root
+    cause was simply an unusable size limit. Both are now rejected
+    with a clear, immediate error instead of silently producing a
+    broken scan.
     """
     settings = settings_for_profile(args.profile)
     if args.use_last_settings:
@@ -79,8 +86,12 @@ def settings_from_args(args):
     if args.output_dir:
         settings.output_dir_name = args.output_dir
     if args.max_file_bytes is not None:
+        if args.max_file_bytes <= 0:
+            raise ValueError(f"--max-file-bytes must be a positive integer (got {args.max_file_bytes}).")
         settings.max_file_bytes = args.max_file_bytes
     if args.max_total_bytes is not None:
+        if args.max_total_bytes <= 0:
+            raise ValueError(f"--max-total-bytes must be a positive integer (got {args.max_total_bytes}).")
         settings.max_total_bytes = args.max_total_bytes
     if args.extensions:
         settings.include_extensions = {normalize_extension(i) for i in args.extensions.split(",") if i.strip()}
@@ -174,6 +185,21 @@ def run_profile_delete(name: str) -> None:
 
 
 def run_cli() -> None:
+    """
+    Bugfix (v3.1.1): building settings and running a build previously
+    had no error handling in this function at all. A nonexistent
+    project folder (validate_root() raises FileNotFoundError /
+    NotADirectoryError), an archive-mode source completeness failure
+    (collect_included_files() raises ValueError), or an invalid
+    --max-file-bytes/--max-total-bytes value (see settings_from_args()
+    above) would previously crash the whole CLI with a raw Python
+    traceback -- confusing and inconsistent with every other error
+    path in this file, which prints a clean message instead. The
+    build is now wrapped so these expected, already-descriptive
+    exceptions are printed cleanly and exit with a nonzero status,
+    the same way a shell script or CI pipeline calling this tool
+    would expect a real failure to be reported.
+    """
     parser = build_parser()
     args = parser.parse_args()
 
@@ -196,8 +222,14 @@ def run_cli() -> None:
         run_gui()
         return
 
-    settings = settings_from_args(args)
-    result = create_context(Path(args.root), settings=settings)
+    try:
+        settings = settings_from_args(args)
+        result = create_context(Path(args.root), settings=settings)
+    except (ValueError, FileNotFoundError, NotADirectoryError) as exc:
+        print(f"{APP_NAME} v{APP_VERSION}")
+        print()
+        print(f"Build failed: {exc}")
+        sys.exit(1)
 
     if args.remember_settings:
         storage.save_last_settings(settings)

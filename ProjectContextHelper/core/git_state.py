@@ -129,17 +129,38 @@ def parse_commit_object(content: bytes) -> dict:
 
 
 def parse_tree_object(content: bytes) -> list[tuple[str, str, str]]:
+    """
+    Parse a decompressed tree object. Bugfix (v3.1.1): a corrupted or
+    truncated tree object (e.g. from a partially copied .git folder,
+    or a bit-flip in a very old repository) previously raised an
+    unhandled ValueError here (content.index() finding no match),
+    which propagated all the way out of build_git_state()'s try/except
+    only because that wrapper happens to catch bare Exception -- but
+    it meant a single malformed tree turned the *entire* Git State
+    feature off with a vague "git state detection failed unexpectedly"
+    message instead of degrading gracefully for just that one
+    sub-tree the way a missing/packed object already does elsewhere in
+    this module. Malformed entries are now skipped with the walk
+    continuing for whatever entries *can* be parsed, consistent with
+    how the rest of this module treats "can't fully read this part of
+    history" as a warning, not a hard failure.
+    """
     entries: list[tuple[str, str, str]] = []
     i = 0
     length = len(content)
     while i < length:
-        space_index = content.index(b" ", i)
-        mode = content[i:space_index].decode("ascii")
-        null_index = content.index(b"\x00", space_index)
-        name = content[space_index + 1:null_index].decode("utf-8", errors="replace")
-        sha_bytes = content[null_index + 1:null_index + 21]
-        entries.append((mode, name, sha_bytes.hex()))
-        i = null_index + 21
+        try:
+            space_index = content.index(b" ", i)
+            mode = content[i:space_index].decode("ascii")
+            null_index = content.index(b"\x00", space_index)
+            name = content[space_index + 1:null_index].decode("utf-8", errors="replace")
+            sha_bytes = content[null_index + 1:null_index + 21]
+            if len(sha_bytes) < 20:
+                break
+            entries.append((mode, name, sha_bytes.hex()))
+            i = null_index + 21
+        except ValueError:
+            break
     return entries
 
 
@@ -219,7 +240,16 @@ def collect_recent_commits(git_dir: Path, head_sha: str, limit: int = 5) -> tupl
     commits: list[str] = []
     warnings: list[str] = []
     current_sha: str | None = head_sha
+    seen_shas: set[str] = set()
     while current_sha and len(commits) < limit:
+        if current_sha in seen_shas:
+            warnings.append(
+                f"detected a repeated commit sha ({current_sha[:12]}) while "
+                "walking history; stopped to avoid an infinite loop on a "
+                "corrupted parent chain."
+            )
+            break
+        seen_shas.add(current_sha)
         object_result = read_loose_object(git_dir, current_sha)
         if object_result is None:
             warnings.append(f"stopped walking commit history at {current_sha[:12]} (not stored as a loose object, likely packed).")

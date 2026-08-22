@@ -9,12 +9,6 @@ in a purpose-built subfolder:
     gui/       the tkinter desktop interface
     docs/      CHANGELOG.md, README.md, and ARCHITECTURE.md
 
-All saving/loading of App Preferences, Last Used Settings, Custom
-Profiles, and Build History goes through services/storage.py -- a
-single consolidated module. No other file in this app performs direct
-file I/O against app_settings.json, last_export_settings.json,
-custom_profiles.json, or build_history.json.
-
 Usage:
     python run.py                      Launch the desktop GUI
     python run.py <folder>             Build a context export for <folder>
