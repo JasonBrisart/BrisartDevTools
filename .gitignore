@@ -140,3 +140,4 @@ web_cache/
 scan_cache/
 ProjectContextHelper/build_history.json
 ProjectContextHelper/last_export_settings.json
+ProjectContextHelper/app_settings.json
