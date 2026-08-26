@@ -1,7 +1,7 @@
 from core.models import ScanSettings
 
 APP_NAME = "Project Context Helper"
-APP_VERSION = "3.1.2"
+APP_VERSION = "3.1.2.1"
 AUTHOR = "Jason Brisart"
 REPOSITORY_NAME = "BrisartDevTools"
 REPOSITORY_URL = "https://github.com/JasonBrisart/BrisartDevTools"
