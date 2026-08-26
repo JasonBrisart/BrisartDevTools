@@ -7,7 +7,7 @@ Part of BrisartDevTools.
 from __future__ import annotations
 
 APP_NAME = "AutoExeBuilder"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 AUTHOR = "Jason Brisart"
 
 REPOSITORY_NAME = "BrisartDevTools"
