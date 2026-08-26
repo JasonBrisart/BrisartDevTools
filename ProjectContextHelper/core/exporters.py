@@ -14,7 +14,6 @@ from core.git_state import GitState
 from core.models import (
     ScanResult,
     ScanSettings,
-    SkipRecord,
 )
 from core.scanner import (
     SOURCE_COMPLETENESS_FAILURE_REASONS,

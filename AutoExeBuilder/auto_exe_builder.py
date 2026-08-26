@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
 from build_profiles import BuildProfile
 from constants import APP_NAME, APP_VERSION, APPLICATION_TAGLINE, AUTHOR, REPOSITORY_NAME, REPOSITORY_URL

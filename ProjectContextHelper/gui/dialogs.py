@@ -1,6 +1,5 @@
 from pathlib import Path
 import os
-import tkinter as tk
 from tkinter import messagebox
 
 from core.models import BuildResult
