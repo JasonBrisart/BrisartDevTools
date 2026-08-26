@@ -6,6 +6,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.1.2.1] - 2026-08-26
+
+### Fixed
+- Removed unused imports left behind in several Project Context Helper modules.
+- Eliminated dead code references that were no longer used by the application.
+
+### Code Cleanup
+The following unused imports were removed:
+
+- `ProjectContextHelper/core/exporters.py`
+  - Removed: `SkipRecord`
+
+- `ProjectContextHelper/gui/build_tab.py`
+  - Removed: `from pathlib import Path`
+
+- `ProjectContextHelper/gui/dialogs.py`
+  - Removed: `import tkinter as tk`
+
+### Maintenance
+- Reduced lint warnings caused by unused imports.
+- Improved overall code cleanliness and maintainability.
+- No functional changes were made to export generation, GUI behavior, scanning workflows, archive creation, or project analysis features.
+
+### Notes
+- This is a hotfix maintenance release focused exclusively on dead code removal and housekeeping.
+- No user-facing behavior changes are expected.
+- Existing exports, manifests, snapshots, and GUI workflows remain unchanged.
+``
+
+---
+
 ## [3.1.2] - 2026-08-22
 
 A second dedicated edge-case bug-fixing pass — seven more issues
