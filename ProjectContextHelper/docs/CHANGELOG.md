@@ -6,7 +6,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [3.1.2.1] - 2026-08-26
+## [3.1.4] - 2026-09-03
+
+A single, targeted edge-case fix in Git State detection, found while
+auditing the codebase for the same class of bug already caught and
+fixed elsewhere in v3.1.2. No CLI flag, GUI control, file format, or
+public function signature changed.
+
+### Fixed
+
+- **Directory and file exclusion matching inside Git State's dirty-tree comparison was case-sensitive, independently of the identical bug already fixed in `core/scanner.py` back in v3.1.2.** `core/git_state.py`'s `compute_working_tree_status()` compared directory names (`part in exclude_dirs`) and file names (`relative_parts[-1] in exclude_files`) with exact, case-sensitive matching. This function is a separate, independent implementation from `core/scanner.py`'s `exclusion_reason()` — it has to be, since it's comparing the working tree against git's tracked blob shas rather than deciding what belongs in an export — so the v3.1.2 fix to `exclusion_reason()` never touched this one. On a case-preserving-but-case-insensitive filesystem (the Windows default, and optionally macOS), a folder actually named `Build`, `Node_Modules`, or `Venv` was not recognized as excluded here, even though `core/scanner.py` already correctly excludes such a folder from the export itself. Every file inside a mismatched-case folder like this — frequently hundreds or thousands of build artifacts or dependency files — was walked anyway, and since such files are normally gitignored (absent from `tracked_blobs`), each one was reported as **"untracked"** in the Git State section, while the same folder's contents were correctly absent from the File Index and Included File Contents sections earlier in the same document.
+
+### Changed
+
+- `compute_working_tree_status()` now compares directory-name and file-name exclusions case-insensitively, using the same `.lower()` normalization already applied to suffix/extension matching in `core/scanner.py`.
+
+### Notes
+
+- Backward compatible: no change to any JSON file's schema, any CLI flag's name or meaning, or any function's public signature.
+- Verified with a real `Node_Modules/` folder (populated with several files) alongside a genuinely modified tracked file in the same repository: before the fix, every file under `Node_Modules/` appeared in the "Untracked" list; after the fix, they're correctly excluded from the walk entirely, while the real modified tracked file still correctly appears in "Modified or deleted since HEAD."
+- No new external dependencies were introduced.
+
+---
+
+## [3.1.3] - 2026-08-26
 
 ### Fixed
 - Removed unused imports left behind in several Project Context Helper modules.

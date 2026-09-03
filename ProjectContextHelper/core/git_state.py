@@ -1,15 +1,16 @@
 """
 Git Repository State
+
 Pure Python, no external dependencies, no subprocess calls into a
 git binary. Extras/optional feature: opt-in, off by default.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
 import hashlib
 import zlib
-
 
 GIT_DIRNAME = ".git"
 HEAD_FILENAME = "HEAD"
@@ -104,6 +105,7 @@ def is_valid_sha(value: str) -> bool:
     internally, but validates leniently here since the only caller
     that needs this check is working with an externally-supplied
     value -- see resolve_branch_sha()).
+
     Bugfix: read_loose_object() builds a filesystem path directly from
     whatever string it is given (`git_dir / "objects" / sha[:2] / sha[2:]`),
     with no validation that the string only contains hex digits. A
@@ -245,11 +247,56 @@ def walk_tree(git_dir: Path, tree_sha: str, prefix: str = "") -> tuple[dict[str,
 def compute_working_tree_status(
     root: Path, git_dir: Path, tree_sha: str, exclude_dirs: set[str], exclude_files: set[str]
 ) -> tuple[bool | None, str, list[str], list[str], list[str]]:
+    """
+    Bugfix (v3.1.3): directory-name and file-name exclusion matching
+    here was case-sensitive (`part in exclude_dirs`, `relative_parts[-1]
+    in exclude_files`) -- the exact same class of bug already fixed in
+    core/scanner.py's exclusion_reason() back in v3.1.2, except this
+    function is a completely separate, independent implementation (it
+    has to be -- it's comparing the working tree against git's tracked
+    blob shas, not deciding what to include in an export), so fixing
+    exclusion_reason() never fixed this one. The two have always been
+    two different implementations of the same "should this path be
+    ignored" concept, and only one of them got the case-insensitivity
+    fix.
+
+    On a case-preserving-but-case-insensitive filesystem (the Windows
+    default, and optionally macOS), a folder actually named `Build`,
+    `Node_Modules`, or `Venv` -- present in DEFAULT_EXCLUDE_DIRS only
+    in lowercase -- was not recognized as excluded here, even though
+    the OS itself treats those names as identical to their
+    default-cased counterparts, and even though core/scanner.py
+    already correctly excludes such a folder from the export proper.
+    Every file inside a folder like this (frequently hundreds or
+    thousands of build artifacts or dependency files) was walked
+    anyway, and since files like these are normally gitignored and
+    therefore absent from `tracked_blobs`, each one was reported as
+    "untracked" in the Git State section of every export -- while the
+    exact same folder's contents were correctly absent from the File
+    Index and Included File Contents sections a few paragraphs above,
+    in the same document. The practical effect was a Git State
+    section that could list a large, misleading pile of "untracked"
+    build/dependency files with nothing to do with the actual project
+    changes a user is trying to review, with no indication anything
+    was being double-counted or miscategorized.
+
+    Directory-name and file-name exclusion here now compare
+    case-insensitively too, using the same `.lower()` normalization
+    already applied to suffix/extension matching in core/scanner.py.
+    Verified with a real `Node_Modules/` folder (populated with
+    several files) alongside a genuinely modified tracked file in the
+    same repository: before the fix, every file under `Node_Modules/`
+    appeared in the "Untracked" list; after the fix, they're correctly
+    excluded from the walk entirely, while the real modified tracked
+    file still correctly appears in "Modified or deleted since HEAD."
+    """
     tracked_blobs, warnings = walk_tree(git_dir, tree_sha)
     if not tracked_blobs and warnings:
         return None, "could not be verified (repository objects are packed)", [], [], warnings
     modified: list[str] = []
     seen_relative_paths: set[str] = set()
+    exclude_dirs_lower = {d.lower() for d in exclude_dirs}
+    exclude_files_lower = {f.lower() for f in exclude_files}
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
@@ -259,9 +306,9 @@ def compute_working_tree_status(
             continue
         if GIT_DIRNAME in relative_parts:
             continue
-        if any(part in exclude_dirs for part in relative_parts[:-1]):
+        if any(part.lower() in exclude_dirs_lower for part in relative_parts[:-1]):
             continue
-        if relative_parts[-1] in exclude_files:
+        if relative_parts[-1].lower() in exclude_files_lower:
             continue
         relative_posix = "/".join(relative_parts)
         seen_relative_paths.add(relative_posix)

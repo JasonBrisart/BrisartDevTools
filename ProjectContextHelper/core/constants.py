@@ -1,12 +1,11 @@
 from core.models import ScanSettings
 
 APP_NAME = "Project Context Helper"
-APP_VERSION = "3.1.2.1"
+APP_VERSION = "3.1.4"
 AUTHOR = "Jason Brisart"
 REPOSITORY_NAME = "BrisartDevTools"
 REPOSITORY_URL = "https://github.com/JasonBrisart/BrisartDevTools"
 RELEASES_URL = "https://github.com/JasonBrisart/BrisartDevTools/releases"
-
 RELEASES_LIST_URL = (
     "https://api.github.com/repos/"
     "JasonBrisart/BrisartDevTools/releases"
@@ -19,13 +18,11 @@ MANIFEST_FILENAME = "PROJECT_MANIFEST.json"
 SUMMARY_FILENAME = "PROJECT_SUMMARY.txt"
 SNAPSHOT_FILENAME = "PROJECT_SNAPSHOT.zip"
 SETTINGS_FILENAME = "PROJECT_CONTEXT_SETTINGS.json"
-
 BUILD_HISTORY_FILENAME = "build_history.json"
 MAX_HISTORY_ENTRIES = 50
 APP_SETTINGS_FILENAME = "app_settings.json"
 LAST_SETTINGS_FILENAME = "last_export_settings.json"
 CUSTOM_PROFILES_FILENAME = "custom_profiles.json"
-
 STAGED_EXE_FILENAME = "staged_update.exe"
 
 DEFAULT_GIT_STATE_COMMIT_LIMIT = 5
@@ -33,7 +30,6 @@ DEFAULT_GIT_STATE_COMMIT_LIMIT = 5
 PROFILE_STANDARD = "standard"
 PROFILE_ARCHIVE = "archive"
 DEFAULT_PROFILE = PROFILE_ARCHIVE
-
 VALID_PROFILES = {
     PROFILE_STANDARD,
     PROFILE_ARCHIVE,
@@ -44,26 +40,22 @@ DEFAULT_EXTENSIONS = {
     ".yaml", ".yml", ".html", ".css", ".js", ".ts", ".tsx", ".jsx",
     ".sql", ".xml", ".bat", ".ps1", ".sh", ".gitignore", ".dockerignore",
 }
-
 ARCHIVE_EXTENSIONS = DEFAULT_EXTENSIONS | {
     ".rst", ".log", ".env.example", ".sample", ".template", ".lock",
     ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".go", ".rs", ".rb",
     ".php", ".swift", ".kt", ".kts", ".r", ".m", ".mm", ".pl", ".lua",
 }
-
 DEFAULT_EXCLUDE_DIRS = {
     ".git", ".venv", "venv", "env", "__pycache__", ".mypy_cache",
     ".pytest_cache", "node_modules", "build", "dist", ".idea",
     ".vscode", "updates", EXPORTS_DIRNAME,
 }
-
 DEFAULT_EXCLUDE_FILES = {
     CONTEXT_FILENAME, MANIFEST_FILENAME, SUMMARY_FILENAME,
     SNAPSHOT_FILENAME, SETTINGS_FILENAME, BUILD_HISTORY_FILENAME,
     APP_SETTINGS_FILENAME, LAST_SETTINGS_FILENAME, CUSTOM_PROFILES_FILENAME,
     ".env", ".env.local", ".env.development", ".env.production", ".env.test",
 }
-
 DEFAULT_EXCLUDE_SUFFIXES = {
     ".pem", ".key", ".crt", ".pfx", ".p12", ".sqlite", ".db", ".exe",
     ".dll", ".so", ".dylib", ".png", ".jpg", ".jpeg", ".gif", ".webp",
